@@ -46,19 +46,19 @@ Claude Code session                  Web browser
 
 ## Installation
 
-1. Clone this repo:
+1. Clone this repo anywhere you like:
    ```bash
-   git clone https://github.com/gooooloo/claude-code-permission-web-approver.git ~/.claude/claude-code-permission-web-approver
+   git clone https://github.com/gooooloo/claude-code-permission-web-approver.git
    ```
 
 2. Start the approval server:
    ```bash
-   python3 ~/.claude/claude-code-permission-web-approver/approval-server.py
+   /path/to/claude-code-permission-web-approver/approval-server.py
    ```
 
 3. In any project directory, install the hooks:
    ```bash
-   ~/.claude/claude-code-permission-web-approver/install.sh
+   /path/to/claude-code-permission-web-approver/install.sh
    ```
 
 4. Open `http://localhost:19836` in your browser (or use your machine's LAN IP from a phone/tablet).

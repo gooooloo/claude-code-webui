@@ -29,6 +29,10 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - When this state is detected, show a notification card in the Web UI informing the user that Claude Code is ready for a new instruction.
   - Provide a text input in the Web UI so the user can type and submit the next prompt directly from the browser, without switching back to the terminal.
   - This enables a fully remote workflow where users can monitor task completion and issue follow-up instructions entirely from the Web UI.
+- [ ] **Bug: Web UI submitted prompt not delivered to Claude**
+  - When the user submits a prompt from the Web UI waiting card, the stop hook correctly blocks and returns a `systemMessage`, but the prompt content is sometimes empty or not received by Claude.
+  - Claude sees "User submitted a new prompt via Web UI" but has no actual instruction to act on.
+  - Need to investigate: is the prompt text being lost in the JSON serialization, or is Claude Code ignoring the `systemMessage` field in the stop hook response?
 - [ ] **Show Claude's last response in the prompt-waiting card**
   - When the Web UI displays a "Claude is ready" waiting card, it currently only shows a text input for the next prompt.
   - The user needs to see what Claude just did/said in order to decide what to instruct next, but this context is only visible in the terminal.

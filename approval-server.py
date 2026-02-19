@@ -524,8 +524,10 @@ async function fetchPending() {
     const data = await res.json();
     document.getElementById('status').textContent =
       'Last checked: ' + new Date().toLocaleTimeString();
-    renderRequests(data.requests.filter(r => !respondedIds.has(r.id)));
+    const filtered = data.requests.filter(r => !respondedIds.has(r.id));
+    renderRequests(filtered);
   } catch (e) {
+    console.error('[DEBUG] fetchPending error:', e);
     document.getElementById('status').textContent = 'Connection error';
   }
 }
@@ -740,7 +742,7 @@ function renderRequests(requests) {
           <div class="buttons">
             <button class="${denyClass}" onclick="respond('${req.id}','deny',this)">Deny</button>
             <button class="btn-always" onclick="respond('${req.id}','always',this)">Always Allow</button>
-            ${['Read','Edit','Write'].includes(req.tool_name) ? '<button class="btn-session" onclick="respondSessionAllow(\'' + req.id + '\',\'' + req.session_id + '\',\'' + req.tool_name + '\',this)">Allow this session</button>' : ''}
+            ${['Read','Edit','Write'].includes(req.tool_name) ? '<button class="btn-session" onclick="respondSessionAllow(\\'' + req.id + '\\',\\'' + req.session_id + '\\',\\'' + req.tool_name + '\\',this)">Allow this session</button>' : ''}
             <button class="${allowClass}" onclick="respond('${req.id}','allow',this)">Allow</button>
           </div>`;
       }

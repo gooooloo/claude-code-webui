@@ -29,6 +29,11 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - When this state is detected, show a notification card in the Web UI informing the user that Claude Code is ready for a new instruction.
   - Provide a text input in the Web UI so the user can type and submit the next prompt directly from the browser, without switching back to the terminal.
   - This enables a fully remote workflow where users can monitor task completion and issue follow-up instructions entirely from the Web UI.
+- [ ] **Show Claude's last response in the prompt-waiting card**
+  - When the Web UI displays a "Claude is ready" waiting card, it currently only shows a text input for the next prompt.
+  - The user needs to see what Claude just did/said in order to decide what to instruct next, but this context is only visible in the terminal.
+  - Pass Claude's last response (the stop hook's stdin or relevant context) through to the waiting card, and render it above the prompt input area.
+  - This makes the remote workflow fully self-contained: the user can read Claude's output and respond without switching back to the terminal.
 - [ ] **Add "Allow Path" button for Write/Edit tools**
   - When the requested tool is `Write` or `Edit`, show a new button on the approval card to configure always-allow path rules
   - Clicking the button opens a path selection interaction:

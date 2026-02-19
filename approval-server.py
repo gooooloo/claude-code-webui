@@ -482,6 +482,30 @@ HTML_PAGE = """<!DOCTYPE html>
   }
   .btn-quick:hover { background: #2a2a4a; color: #fff; }
   .btn-quick:active { transform: scale(0.97); }
+  .path-select-area {
+    margin-bottom: 12px;
+  }
+  .path-option {
+    background: #0f0f23;
+    border: 2px solid #2a2a4a;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 13px;
+    font-family: monospace;
+    color: #e0e0e0;
+  }
+  .path-option:hover { border-color: #f59e0b55; background: #16213e; }
+  .path-option:active { transform: scale(0.99); }
+  .path-option .path-label { color: #f59e0b; font-weight: 600; }
+  .path-option .path-pattern { color: #888; font-size: 11px; margin-top: 2px; }
+  .btn-allow-path {
+    background: #78350f;
+    color: #fbbf24;
+  }
+  .btn-allow-path:hover { background: #92400e; }
   .btn-submit-prompt {
     background: #10b981;
     color: white;
@@ -536,6 +560,10 @@ function toolCategory(name) {
 function isBenign(cat) {
   return cat === 'plan' || cat === 'question' || cat === 'read';
 }
+
+// Store request data for path-select lookups
+const reqDataMap = {};
+
 
 async function fetchPending() {
   try {
@@ -736,6 +764,7 @@ function renderRequests(requests) {
       const isPrompt = req.type === 'prompt-waiting';
       const cat = isPrompt ? 'prompt' : toolCategory(req.tool_name);
       const benign = isBenign(cat);
+      reqDataMap[req.id] = req;
       const card = document.createElement('div');
       card.className = 'card cat-' + cat;
       card.id = 'card-' + req.id;
@@ -786,9 +815,11 @@ function renderRequests(requests) {
           ${req.detail_sub ? '<div class="detail" style="margin-top:8px;color:#aaa;font-size:12px">' + esc(req.detail_sub) + '</div>' : ''}
           <div class="allow-info">"Always Allow" will apply to: <code>${esc(req.allow_pattern)}</code></div>
           ${['Read','Edit','Write'].includes(req.tool_name) ? '<div class="allow-info">"Allow this session" will auto-approve all <code>' + esc(req.tool_name) + '</code> calls in session ' + esc(String(req.session_id)) + '</div>' : ''}
+          ${['Edit','Write'].includes(req.tool_name) ? '<div class="path-select-area" id="path-area-' + req.id + '" style="display:none"></div>' : ''}
           <div class="buttons">
             <button class="${denyClass}" onclick="respond('${req.id}','deny',this)">Deny</button>
             <button class="btn-always" onclick="respond('${req.id}','always',this)">Always Allow</button>
+            ${['Edit','Write'].includes(req.tool_name) ? '<button class="btn-allow-path" onclick="togglePathSelect(\\'' + req.id + '\\')">Allow Path</button>' : ''}
             ${['Read','Edit','Write'].includes(req.tool_name) ? '<button class="btn-session" onclick="respondSessionAllow(\\'' + req.id + '\\',\\'' + req.session_id + '\\',\\'' + req.tool_name + '\\',this)">Allow this session</button>' : ''}
             <button class="${allowClass}" onclick="respond('${req.id}','allow',this)">Allow</button>
           </div>`;
@@ -841,6 +872,62 @@ async function respondSessionAllow(id, sessionId, toolName, btn) {
   } catch (e) {
     buttons.forEach(b => b.disabled = false);
     btn.textContent = 'Error';
+  }
+}
+
+function togglePathSelect(reqId) {
+  const area = document.getElementById('path-area-' + reqId);
+  if (!area) return;
+  if (area.style.display !== 'none') {
+    area.style.display = 'none';
+    return;
+  }
+  const req = reqDataMap[reqId];
+  if (!req) return;
+  const filePath = (req.tool_input && req.tool_input.file_path) || '';
+  const projectDir = req.project_dir || '';
+  const toolName = req.tool_name || 'Write';
+  if (!filePath) return;
+
+  // Build directory segments between project_dir and file
+  const rel = projectDir && filePath.startsWith(projectDir)
+    ? filePath.slice(projectDir.length).replace(/^\\//, '')
+    : filePath;
+  const parts = rel.split('/').filter(Boolean);
+  const projectName = projectDir.split('/').filter(Boolean).pop() || '';
+
+  let html = '';
+  let cumPath = projectDir;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cumPath += '/' + parts[i];
+    const displayPath = projectName + '/' + parts.slice(0, i + 1).join('/') + '/*';
+    const pattern = toolName + '(' + cumPath + '/*)';
+    html += '<div class="path-option" onclick="submitPathAllow(\\'' + reqId + '\\',\\'' + esc(pattern).replace(/'/g, "\\\\'") + '\\')">'
+      + '<div class="path-label">' + esc(displayPath) + '</div>'
+      + '<div class="path-pattern">' + esc(pattern) + '</div>'
+      + '</div>';
+  }
+  area.innerHTML = html;
+  area.style.display = 'block';
+}
+
+async function submitPathAllow(reqId, pattern) {
+  const card = document.getElementById('card-' + reqId);
+  card.querySelectorAll('button, .path-option').forEach(el => {
+    if (el.tagName === 'BUTTON') el.disabled = true;
+    else el.style.pointerEvents = 'none';
+  });
+  try {
+    await fetch('/api/respond', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: reqId, decision: 'always', allow_pattern: pattern})
+    });
+    respondedIds.add(reqId);
+    knownIds.delete(reqId);
+    card.remove();
+  } catch (e) {
+    card.querySelectorAll('button').forEach(b => b.disabled = false);
   }
 }
 
@@ -1154,7 +1241,8 @@ class ApprovalHandler(BaseHTTPRequestHandler):
                     with open(request_file) as f:
                         req_data = json.load(f)
                     settings_file = req_data.get("settings_file", "")
-                    allow_pattern = req_data.get("allow_pattern", "")
+                    # Allow client to override the pattern (e.g., directory-level Allow Path)
+                    allow_pattern = body.get("allow_pattern") or req_data.get("allow_pattern", "")
                     if settings_file and allow_pattern:
                         self._add_to_settings(settings_file, allow_pattern)
                 except (json.JSONDecodeError, IOError):

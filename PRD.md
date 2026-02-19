@@ -35,3 +35,8 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
     - Use an environment variable (e.g., `$CLAUDE_APPROVER_HOME`) that resolves at runtime
     - Have the hook script resolve its own location dynamically rather than relying on a hardcoded path
   - Goal: A user can clone the repo, run install, and use the hook without their personal file paths appearing in any shared/committed configuration
+- [ ] **Increase default visible height for Plan detail view**
+  - Problem: The collapsed `.detail` area currently has `max-height: 120px` (~6 lines on desktop, ~4 lines on mobile at 80px), which is almost never enough to read a plan without expanding.
+  - Increase the default collapsed height so that at least 15-20 lines are visible without clicking "Show more" (e.g., `max-height: 360px` desktop / `240px` mobile).
+  - Plans are typically long and important for decision-making; users should be able to scan most of a plan at a glance.
+  - Consider whether plan cards specifically should have a larger default than other card types, or if the increase should apply globally.

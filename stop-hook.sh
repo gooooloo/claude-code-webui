@@ -7,8 +7,18 @@
 QUEUE_DIR="/tmp/claude-approvals"
 mkdir -p "$QUEUE_DIR"
 
-# Read stdin with timeout to avoid blocking if no data is sent
-INPUT=$(timeout 1 cat 2>/dev/null || true)
+# If already inside a stop-hook continuation, just approve to avoid infinite loops
+if [ "${CLAUDE_STOP_HOOK_ACTIVE:-}" = "1" ]; then
+  jq -n '{ decision: "approve" }'
+  exit 0
+fi
+export CLAUDE_STOP_HOOK_ACTIVE=1
+
+# Read stdin (stop hooks receive it reliably)
+INPUT=$(cat)
+
+# Extract last_assistant_message from stdin JSON
+LAST_RESPONSE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null || true)
 
 # Generate unique request ID
 REQUEST_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)
@@ -40,13 +50,15 @@ jq -n \
   --arg pid "$$" \
   --arg session_id "$PPID" \
   --arg project_dir "$PROJECT_DIR" \
+  --arg last_response "$LAST_RESPONSE" \
   '{
     id: $id,
     type: $type,
     timestamp: ($timestamp | tonumber),
     pid: ($pid | tonumber),
     session_id: ($session_id | tonumber),
-    project_dir: $project_dir
+    project_dir: $project_dir,
+    last_response: $last_response
   }' > "$WAITING_FILE"
 
 

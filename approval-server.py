@@ -615,6 +615,11 @@ function setupCollapsible(card) {
 }
 
 function renderPromptCard(req, time) {
+  let responseHtml = '';
+  if (req.last_response) {
+    responseHtml = `
+      <div class="detail collapsed" id="prompt-response-${req.id}">${renderMarkdown(req.last_response)}</div>`;
+  }
   return `
     <div class="card-header">
       <span class="tool-badge badge-prompt">Claude is ready</span>
@@ -624,6 +629,7 @@ function renderPromptCard(req, time) {
     </div>
     <div class="project-path">${esc(req.project_dir || '')}</div>
     <div class="prompt-text">Claude has finished and is waiting for your next instruction.</div>
+    ${responseHtml}
     <textarea class="prompt-input" id="prompt-input-${req.id}" placeholder="Type your next instruction for Claude..." rows="3"></textarea>
     <div class="buttons">
       <button class="btn-dismiss" onclick="dismissPrompt('${req.id}',this)">Dismiss</button>

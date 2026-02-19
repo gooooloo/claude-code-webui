@@ -32,7 +32,7 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
 - [x] **Bug: Web UI submitted prompt not delivered to Claude**
   - Root cause: `systemMessage` in stop hooks is only a warning display, not a prompt injection. Claude reads the `reason` field instead.
   - Fix: moved the user's prompt into the `reason` field of the stop hook response.
-- [ ] **Show Claude's last response in the prompt-waiting card**
+- [x] **Show Claude's last response in the prompt-waiting card**
   - When the Web UI displays a "Claude is ready" waiting card, it currently only shows a text input for the next prompt.
   - The user needs to see what Claude just did/said in order to decide what to instruct next, but this context is only visible in the terminal.
   - Pass Claude's last response (the stop hook's stdin or relevant context) through to the waiting card, and render it above the prompt input area.
@@ -72,3 +72,7 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - Investigate whether it's possible to send instructions directly to an idle/waiting Claude Code process via its stdin (stdio), bypassing the stop hook entirely.
   - If feasible, this could simplify the architecture: instead of blocking the stop event, just let Claude stop normally and then pipe a new prompt into its stdin when the user submits one from the Web UI.
   - Research areas: how Claude Code reads stdin, whether it accepts input when in the idle/prompt-waiting state, and whether there are any APIs or IPC mechanisms that could be leveraged.
+- [ ] **Add "Clear Context and Edit" shortcut (Shift+Tab) to ExitPlanMode card**
+  - When an ExitPlanMode approval card is shown in the Web UI, add a keyboard shortcut (Shift+Tab) or button that triggers the "Clear context and edit" action.
+  - This mirrors the Shift+Tab behavior available in the Claude Code CLI terminal.
+  - Allows the user to clear the current context and re-edit the plan directly from the Web UI without switching back to the terminal.

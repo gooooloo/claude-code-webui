@@ -120,6 +120,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .card.cat-question { border-left-color: #22d3ee; }
   .card.cat-read     { border-left-color: #4ade80; }
   .card.cat-prompt   { border-left-color: #10b981; }
+  .card.cat-web      { border-left-color: #3b82f6; }
   .card.cat-other    { border-left-color: #666; }
   @keyframes slideIn {
     from { opacity: 0; transform: translateY(-10px); }
@@ -143,6 +144,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .badge-question { background: #22d3ee22; color: #22d3ee; }
   .badge-read     { background: #4ade8022; color: #4ade80; }
   .badge-prompt   { background: #10b98122; color: #10b981; }
+  .badge-web      { background: #3b82f622; color: #3b82f6; }
   .badge-other    { background: #66666622; color: #999; }
   .project-tag {
     background: #facc1522;
@@ -609,11 +611,12 @@ function toolCategory(name) {
   if (/^(Write|Edit|NotebookEdit)(|mcp__.*)$/.test(name) ||
       name.startsWith('mcp__') && /Write|Edit/.test(name)) return 'write';
   if (name === 'Read' || (name.startsWith('mcp__') && /Read/.test(name))) return 'read';
+  if (name === 'WebFetch' || name === 'WebSearch') return 'web';
   return 'other';
 }
 
 function isBenign(cat) {
-  return cat === 'plan' || cat === 'question' || cat === 'read';
+  return cat === 'plan' || cat === 'question' || cat === 'read' || cat === 'web';
 }
 
 // Store request data for path-select lookups

@@ -96,6 +96,19 @@ case "$TOOL_NAME" in
     DETAIL_SUB=""
     ALLOW_PATTERN="AskUserQuestion"
     ;;
+  WebFetch)
+    URL=$(echo "$TOOL_INPUT" | jq -r '.url // ""')
+    PROMPT_TEXT=$(echo "$TOOL_INPUT" | jq -r '.prompt // ""')
+    DETAIL="$URL"
+    DETAIL_SUB="$PROMPT_TEXT"
+    ALLOW_PATTERN="WebFetch"
+    ;;
+  WebSearch)
+    QUERY=$(echo "$TOOL_INPUT" | jq -r '.query // ""')
+    DETAIL="$QUERY"
+    DETAIL_SUB=""
+    ALLOW_PATTERN="WebSearch"
+    ;;
   *)
     DETAIL=$(echo "$TOOL_INPUT" | jq -r 'to_entries | map("\(.key): \(.value)") | join("\n")' 2>/dev/null | head -10)
     DETAIL_SUB=""

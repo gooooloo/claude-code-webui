@@ -114,6 +114,7 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
 - [x] **Bug: "Allow Path" button click has no effect in Web UI**
   - When clicking the "Allow Path" option on Write/Edit tool approval cards, nothing happens.
   - Investigate why the click handler is not working and fix the issue.
-- [ ] **Bug: Fetch permission requests not displayed in Web UI**
+- [x] **Bug: Fetch permission requests not displayed in Web UI**
   - When Claude Code requests permission to fetch a URL (e.g., WebFetch), the approval prompt appears in the terminal but not in the Web UI.
   - Investigate whether the Fetch tool goes through the permission hook system and ensure it is rendered as a card in the Web UI.
+  - Added explicit WebFetch/WebSearch handling in approve-dialog.sh and Web UI (blue 'web' category). If the hook is still not triggered, the issue may be in Claude Code's permission routing.

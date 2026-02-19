@@ -952,6 +952,12 @@ function togglePathSelect(reqId) {
   const projectName = projectDir.split('/').filter(Boolean).pop() || '';
 
   let html = '';
+  // Always include project root as first option
+  const rootPattern = toolName + '(' + projectDir + '/*)';
+  html += '<div class="path-option" onclick="submitPathAllow(\\'' + reqId + '\\',\\'' + esc(rootPattern).replace(/'/g, "\\\\'") + '\\')">'
+    + '<div class="path-label">' + esc(projectName + '/*') + '</div>'
+    + '<div class="path-pattern">' + esc(rootPattern) + '</div>'
+    + '</div>';
   let cumPath = projectDir;
   for (let i = 0; i < parts.length - 1; i++) {
     cumPath += '/' + parts[i];

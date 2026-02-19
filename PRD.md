@@ -104,6 +104,6 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
 - [x] **Increase spacing between "Show more" button and quick-action buttons (e.g., /clear)**
   - On mobile especially, the "Show more" toggle and quick-action buttons like "/clear" are too close together, leading to accidental taps.
   - Add more vertical margin/padding between the detail section (including its "Show more" button) and the quick-action button area to prevent mis-taps.
-- [ ] **Bug: "Allow Path" button click has no effect in Web UI**
+- [x] **Bug: "Allow Path" button click has no effect in Web UI**
   - When clicking the "Allow Path" option on Write/Edit tool approval cards, nothing happens.
   - Investigate why the click handler is not working and fix the issue.

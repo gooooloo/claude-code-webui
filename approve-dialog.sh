@@ -116,6 +116,50 @@ case "$TOOL_NAME" in
     ;;
 esac
 
+# ── Auto-allow check: match against settings.local.json allow rules ──
+# Claude Code caches settings at startup, so patterns added by the Web UI
+# during a session are not picked up. We check them here in the hook instead.
+if [ -f "$SETTINGS_FILE" ]; then
+  ALLOW_LIST=$(jq -r '.permissions.allow[]? // empty' "$SETTINGS_FILE" 2>/dev/null)
+  if [ -n "$ALLOW_LIST" ]; then
+    AUTO_ALLOWED=false
+    while IFS= read -r pattern; do
+      [ -z "$pattern" ] && continue
+      if [ "$pattern" = "$TOOL_NAME" ]; then
+        # Exact tool name match (e.g., "Read", "WebSearch")
+        AUTO_ALLOWED=true
+        break
+      fi
+      # Check if pattern starts with "ToolName(" and ends with ")"
+      case "$pattern" in
+        "${TOOL_NAME}("*")")
+          # Extract the inner part between parentheses
+          inner="${pattern#${TOOL_NAME}(}"
+          inner="${inner%)}"
+          # Match DETAIL (file path or command) against the inner pattern
+          # Claude Code uses ":*" suffix as "starts with" (e.g., "git status:*")
+          # Convert ":*" to just "*" for bash glob matching
+          glob_inner="${inner//:*/*}"
+          if [[ "$DETAIL" == $glob_inner ]]; then
+            AUTO_ALLOWED=true
+            break
+          fi
+          ;;
+      esac
+    done <<< "$ALLOW_LIST"
+
+    if [ "$AUTO_ALLOWED" = true ]; then
+      jq -n '{
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: { behavior: "allow" }
+        }
+      }'
+      exit 0
+    fi
+  fi
+fi
+
 # Generate unique request ID
 REQUEST_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)
 REQUEST_FILE="$QUEUE_DIR/$REQUEST_ID.request.json"

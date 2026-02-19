@@ -67,11 +67,13 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - Example: `foo xxx | bar xxx` → show two allow options: `Bash(foo:*)` and `Bash(bar:*)`.
   - Example: `npm run build && npm test` → show two allow options: `Bash(npm run:*)` and `Bash(npm test:*)`.
   - This gives users finer-grained control and avoids needing to re-approve each sub-command separately in future requests.
-- [ ] **Investigate: feed prompts to idle Claude Code via stdio instead of stop hook**
+- [x] **Investigate: feed prompts to idle Claude Code via stdio instead of stop hook**
   - Currently, the stop hook blocks Claude from stopping and injects a prompt via `systemMessage`. This approach has issues: multiple hook instances can accumulate, and there's inherent complexity in managing the hook lifecycle.
   - Investigate whether it's possible to send instructions directly to an idle/waiting Claude Code process via its stdin (stdio), bypassing the stop hook entirely.
   - If feasible, this could simplify the architecture: instead of blocking the stop event, just let Claude stop normally and then pipe a new prompt into its stdin when the user submits one from the Web UI.
   - Research areas: how Claude Code reads stdin, whether it accepts input when in the idle/prompt-waiting state, and whether there are any APIs or IPC mechanisms that could be leveraged.
+  - **Conclusion: Not feasible via stdio.** Claude Code uses the Ink terminal UI library, which treats programmatic stdin newlines as literal characters (not Enter key presses). No IPC/API/CLI mechanism exists to send prompts to a running session. Feature requests exist (#15553, #6009) but are not implemented.
+  - **Alternative considered: `claude -p -c`** — let Claude exit normally, then run `echo "prompt" | claude -p -c` to continue the session. Potentially cleaner but has unknowns (permission hooks in `-p` mode, startup overhead, long task handling). Deferred — current stop hook approach is sufficient for now.
 - [ ] *(on hold)* **Add "Clear Context and Edit" shortcut (Shift+Tab) to ExitPlanMode card**
   - When an ExitPlanMode approval card is shown in the Web UI, add a keyboard shortcut (Shift+Tab) or button that triggers the "Clear context and edit" action.
   - This mirrors the Shift+Tab behavior available in the Claude Code CLI terminal.

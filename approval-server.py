@@ -175,7 +175,7 @@ HTML_PAGE = """<!DOCTYPE html>
     position: relative;
     overflow: hidden;
   }
-  .detail.collapsed { max-height: 120px; }
+  .detail.collapsed { max-height: 380px; }
   .detail.collapsed::after {
     content: '';
     position: absolute;
@@ -530,7 +530,7 @@ HTML_PAGE = """<!DOCTYPE html>
     .card { padding: 14px; }
     .card-header { flex-wrap: wrap; gap: 6px; }
     .detail { font-size: 12px; }
-    .detail.collapsed { max-height: 80px; }
+    .detail.collapsed { max-height: 260px; }
     .buttons { flex-wrap: wrap; }
     .buttons button { flex: 1; min-width: 80px; }
   }

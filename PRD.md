@@ -76,10 +76,10 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - When an ExitPlanMode approval card is shown in the Web UI, add a keyboard shortcut (Shift+Tab) or button that triggers the "Clear context and edit" action.
   - This mirrors the Shift+Tab behavior available in the Claude Code CLI terminal.
   - Allows the user to clear the current context and re-edit the plan directly from the Web UI without switching back to the terminal.
-- [ ] **Update quick-action buttons: replace "Push to GitHub" with "Clean up this task" and reorder**
+- [x] **Update quick-action buttons: replace "Push to GitHub" with "Clean up this task" and reorder**
   - Replace the "Push to GitHub" button with "Clean up this task" (prompt: "Commit the current changes and push to GitHub")
   - Reorder buttons to: "Clean up this task" first, then "/clear", then "Next TODO"
-  - "Clean up this task" combines commit + push into one action, which is more useful as a default workflow step
+  - "Clean up this task" combines commit + push into one action (prompt: "Commit the current changes and push"), which is more useful as a default workflow step
 - [ ] **Fix last line clipping in response textbox on prompt-waiting card**
   - In the Web UI prompt-waiting card, the response textbox (showing Claude's last response) has a display issue where the last line of text appears partially cut off or clipped by margin/padding.
   - The bottom of the last line is visually obscured, likely caused by insufficient padding-bottom or margin interference in the response container.

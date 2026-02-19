@@ -679,9 +679,9 @@ function renderPromptCard(req, time) {
     <div class="prompt-text">Claude has finished and is waiting for your next instruction.</div>
     ${responseHtml}
     <div class="quick-actions">
+      <button class="btn-quick" onclick="quickPrompt('${req.id}','Commit the current changes and push')">Wrap up this task</button>
       <button class="btn-quick" onclick="quickPrompt('${req.id}','/clear')">/clear</button>
       <button class="btn-quick" onclick="quickPrompt('${req.id}','Implement the next TODO item from PRD.md')">Next TODO</button>
-      <button class="btn-quick" onclick="quickPrompt('${req.id}','Commit the current changes and push to GitHub')">Push to GitHub</button>
     </div>
     <textarea class="prompt-input" id="prompt-input-${req.id}" placeholder="Type your next instruction for Claude..." rows="3"></textarea>
     <div class="buttons">

@@ -116,6 +116,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .card.cat-plan     { border-left-color: #a78bfa; }
   .card.cat-question { border-left-color: #22d3ee; }
   .card.cat-read     { border-left-color: #4ade80; }
+  .card.cat-prompt   { border-left-color: #10b981; }
   .card.cat-other    { border-left-color: #666; }
   @keyframes slideIn {
     from { opacity: 0; transform: translateY(-10px); }
@@ -138,6 +139,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .badge-plan     { background: #a78bfa22; color: #a78bfa; }
   .badge-question { background: #22d3ee22; color: #22d3ee; }
   .badge-read     { background: #4ade8022; color: #4ade80; }
+  .badge-prompt   { background: #10b98122; color: #10b981; }
   .badge-other    { background: #66666622; color: #999; }
   .project-tag {
     background: #facc1522;
@@ -435,6 +437,43 @@ HTML_PAGE = """<!DOCTYPE html>
   }
   .btn-answer:hover { background: #06b6d4; }
   .btn-answer:disabled { background: #22d3ee55; color: #0f0f23aa; }
+  /* Prompt input card styles */
+  .prompt-text {
+    color: #10b981;
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .prompt-input {
+    width: 100%;
+    background: #0f0f23;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    color: #e0e0e0;
+    padding: 10px 12px;
+    font-size: 16px;
+    font-family: monospace;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 80px;
+    margin-bottom: 14px;
+  }
+  .prompt-input:focus {
+    outline: none;
+    border-color: #10b981;
+  }
+  .prompt-input::placeholder { color: #555; }
+  .btn-submit-prompt {
+    background: #10b981;
+    color: white;
+    font-weight: 700;
+  }
+  .btn-submit-prompt:hover { background: #059669; }
+  .btn-dismiss {
+    background: #333;
+    color: #ccc;
+  }
+  .btn-dismiss:hover { background: #555; }
   .q-section { margin-bottom: 14px; }
   .q-section-question {
     color: #22d3ee;
@@ -573,6 +612,60 @@ function setupCollapsible(card) {
   });
 }
 
+function renderPromptCard(req, time) {
+  return `
+    <div class="card-header">
+      <span class="tool-badge badge-prompt">Claude is ready</span>
+      <span class="project-tag">${esc(req.project_dir || '').split('/').pop()}</span>
+      <span class="session-id">Session ${req.session_id || '?'}</span>
+      <span class="timestamp">${time}</span>
+    </div>
+    <div class="project-path">${esc(req.project_dir || '')}</div>
+    <div class="prompt-text">Claude has finished and is waiting for your next instruction.</div>
+    <textarea class="prompt-input" id="prompt-input-${req.id}" placeholder="Type your next instruction for Claude..." rows="3"></textarea>
+    <div class="buttons">
+      <button class="btn-dismiss" onclick="dismissPrompt('${req.id}',this)">Dismiss</button>
+      <button class="btn-submit-prompt" onclick="submitPrompt('${req.id}')">Submit</button>
+    </div>`;
+}
+
+async function submitPrompt(id) {
+  const input = document.getElementById('prompt-input-' + id);
+  const prompt = input ? input.value.trim() : '';
+  if (!prompt) { if (input) input.focus(); return; }
+  const card = document.getElementById('card-' + id);
+  card.querySelectorAll('button, textarea').forEach(el => el.disabled = true);
+  try {
+    await fetch('/api/submit-prompt', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, prompt})
+    });
+    respondedIds.add(id);
+    knownIds.delete(id);
+    card.remove();
+  } catch (e) {
+    card.querySelectorAll('button, textarea').forEach(el => el.disabled = false);
+  }
+}
+
+async function dismissPrompt(id, btn) {
+  const card = document.getElementById('card-' + id);
+  card.querySelectorAll('button, textarea').forEach(el => el.disabled = true);
+  try {
+    await fetch('/api/dismiss-prompt', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id})
+    });
+    respondedIds.add(id);
+    knownIds.delete(id);
+    card.remove();
+  } catch (e) {
+    card.querySelectorAll('button, textarea').forEach(el => el.disabled = false);
+  }
+}
+
 function renderRequests(requests) {
   const container = document.getElementById('requests');
   if (requests.length === 0) {
@@ -591,17 +684,21 @@ function renderRequests(requests) {
   // Add new cards
   requests.forEach(req => {
     if (!knownIds.has(req.id)) {
-      const cat = toolCategory(req.tool_name);
+      const isPrompt = req.type === 'prompt-waiting';
+      const cat = isPrompt ? 'prompt' : toolCategory(req.tool_name);
       const benign = isBenign(cat);
       const card = document.createElement('div');
       card.className = 'card cat-' + cat;
       card.id = 'card-' + req.id;
       const time = new Date(req.timestamp * 1000).toLocaleTimeString();
-      const detailHtml = renderDetail(req, cat);
+
+      const detailHtml = isPrompt ? '' : renderDetail(req, cat);
       const denyClass = benign ? 'btn-deny-sm' : 'btn-deny';
       const allowClass = benign ? 'btn-allow-lg' : 'btn-allow';
 
-      if (cat === 'plan') {
+      if (isPrompt) {
+        card.innerHTML = renderPromptCard(req, time);
+      } else if (cat === 'plan') {
         // Plan-specific layout matching Claude Code CLI
         card.innerHTML = `
           <div class="card-header">
@@ -949,6 +1046,21 @@ class ApprovalHandler(BaseHTTPRequestHandler):
                     requests.append(data)
                 except (json.JSONDecodeError, IOError):
                     continue
+            # Also scan for prompt-waiting markers
+            for path in sorted(glob.glob(os.path.join(QUEUE_DIR, "*.prompt-waiting.json"))):
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    resp_path = path.replace(".prompt-waiting.json", ".prompt-response.json")
+                    if os.path.exists(resp_path):
+                        continue
+                    pid = data.get("pid")
+                    if pid and not _is_pid_alive(pid):
+                        os.remove(path)
+                        continue
+                    requests.append(data)
+                except (json.JSONDecodeError, IOError):
+                    continue
             self.wfile.write(json.dumps({"requests": requests}).encode())
         else:
             self.send_error(404)
@@ -1007,6 +1119,39 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             with open(response_file, "w") as f:
                 json.dump(resp_data, f)
 
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}).encode())
+        elif self.path == "/api/submit-prompt":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            request_id = body.get("id", "")
+            prompt = body.get("prompt", "")
+            waiting_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-waiting.json")
+            if not os.path.exists(waiting_file):
+                self.send_error(404, "Prompt request not found")
+                return
+            response_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-response.json")
+            with open(response_file, "w") as f:
+                json.dump({"action": "submit", "prompt": prompt}, f)
+            print(f"[>] Prompt submitted for {request_id}: {prompt[:80]}")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}).encode())
+        elif self.path == "/api/dismiss-prompt":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            request_id = body.get("id", "")
+            waiting_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-waiting.json")
+            if not os.path.exists(waiting_file):
+                self.send_error(404, "Prompt request not found")
+                return
+            response_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-response.json")
+            with open(response_file, "w") as f:
+                json.dump({"action": "dismiss"}, f)
+            print(f"[x] Prompt dismissed for {request_id}")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()

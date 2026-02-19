@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./approve-dialog.sh",
+            "command": "/Users/qidu/dev/claude-code-permission-web-approver/approve-dialog.sh",
             "timeout": 86400
           }
         ]
@@ -18,8 +18,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./post-cleanup.sh",
+            "command": "/Users/qidu/dev/claude-code-permission-web-approver/post-cleanup.sh",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/qidu/dev/claude-code-permission-web-approver/stop-hook.sh",
+            "timeout": 86400
           }
         ]
       }

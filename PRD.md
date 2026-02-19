@@ -24,7 +24,7 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - However, as soon as the Web UI is opened (e.g., from a phone), the auto-allowed request is immediately approved.
   - This suggests the auto-allow logic only runs on client connection/page load rather than being evaluated server-side when the request first arrives.
   - Expected behavior: Session-level auto-allow rules should be evaluated server-side immediately when a new request comes in, regardless of whether any browser client is connected.
-- [ ] **Hook into "waiting for input" state and enable prompt submission from Web UI**
+- [x] **Hook into "waiting for input" state and enable prompt submission from Web UI**
   - Extend the hook to detect when Claude Code has finished a task and is idle, waiting for the next user instruction (the prompt input state).
   - When this state is detected, show a notification card in the Web UI informing the user that Claude Code is ready for a new instruction.
   - Provide a text input in the Web UI so the user can type and submit the next prompt directly from the browser, without switching back to the terminal.
@@ -53,3 +53,9 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
 - [ ] **Fix mobile button area height when card has 4 buttons**
   - On mobile, when a card has 4 buttons (e.g., Deny / Always Allow / Allow this session / Allow), the button area doesn't have enough height and buttons may overlap or get cut off.
   - Ensure the `.buttons` container wraps properly on small screens and all buttons remain fully visible and tappable.
+- [ ] **Split "Always Allow" for compound Bash commands (pipes and &&)**
+  - When a Bash command contains pipes (`|`) or `&&`, the current "Always Allow" button only creates a single allow pattern for the first command.
+  - Instead, parse the compound command and offer individual "Always Allow" entries for each sub-command.
+  - Example: `foo xxx | bar xxx` → show two allow options: `Bash(foo:*)` and `Bash(bar:*)`.
+  - Example: `npm run build && npm test` → show two allow options: `Bash(npm run:*)` and `Bash(npm test:*)`.
+  - This gives users finer-grained control and avoids needing to re-approve each sub-command separately in future requests.

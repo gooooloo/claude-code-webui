@@ -32,6 +32,18 @@ HOOKS_CONFIG='{
         }
       ]
     }
+  ],
+  "Stop": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "'"$SHARED_DIR"'/stop-hook.sh",
+          "timeout": 86400
+        }
+      ]
+    }
   ]
 }'
 

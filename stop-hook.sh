@@ -62,8 +62,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
     if [ "$ACTION" = "submit" ] && [ -n "$PROMPT" ]; then
       jq -n --arg prompt "$PROMPT" '{
         decision: "block",
-        reason: "User submitted a new prompt via Web UI",
-        systemMessage: $prompt
+        reason: ("User submitted a new prompt via Web UI:\n" + $prompt)
       }'
     else
       jq -n '{ decision: "approve" }'

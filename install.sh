@@ -7,7 +7,16 @@ set -e
 SHARED_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(pwd)"
 SETTINGS_FILE="$PROJECT_DIR/.claude/settings.json"
+HOOKS_DIR="$HOME/.claude/hooks"
 
+# Create symlinks in ~/.claude/hooks/ so settings.json doesn't contain user-specific paths
+mkdir -p "$HOOKS_DIR"
+for script in approve-dialog.sh post-cleanup.sh stop-hook.sh; do
+  ln -sf "$SHARED_DIR/$script" "$HOOKS_DIR/$script"
+done
+echo "Symlinked hooks to: $HOOKS_DIR"
+
+# Use $HOME in commands so settings.json is portable (no hardcoded username/paths)
 HOOKS_CONFIG='{
   "PermissionRequest": [
     {
@@ -15,7 +24,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "'"$SHARED_DIR"'/approve-dialog.sh",
+          "command": "bash \"$HOME/.claude/hooks/approve-dialog.sh\"",
           "timeout": 86400
         }
       ]
@@ -27,7 +36,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "'"$SHARED_DIR"'/post-cleanup.sh",
+          "command": "bash \"$HOME/.claude/hooks/post-cleanup.sh\"",
           "timeout": 5
         }
       ]
@@ -39,7 +48,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "'"$SHARED_DIR"'/stop-hook.sh",
+          "command": "bash \"$HOME/.claude/hooks/stop-hook.sh\"",
           "timeout": 86400
         }
       ]

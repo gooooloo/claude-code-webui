@@ -45,7 +45,7 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
     - Also supports manual input/editing of custom paths
   - Once a path is selected, subsequent Write/Edit requests under that path are auto-approved without further review
   - Purpose: Give users granular control over which directories allow automatic file modifications, rather than a blanket global allow
-- [ ] **Avoid exposing absolute paths (and usernames) in settings.json hooks**
+- [x] **Avoid exposing absolute paths (and usernames) in settings.json hooks**
   - Problem: The `install.sh` script writes hardcoded absolute paths (e.g., `/Users/john/projects/claude-code-permission-web-approver/approve-dialog.sh`) into Claude Code's `settings.json`. This leaks the user's filesystem layout and potentially their system username when the git repo is shared or committed.
   - Need to find an approach that avoids embedding user-specific absolute paths in any file that might be checked into version control or shared.
   - Possible directions to explore:

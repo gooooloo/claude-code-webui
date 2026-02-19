@@ -72,7 +72,7 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
   - Investigate whether it's possible to send instructions directly to an idle/waiting Claude Code process via its stdin (stdio), bypassing the stop hook entirely.
   - If feasible, this could simplify the architecture: instead of blocking the stop event, just let Claude stop normally and then pipe a new prompt into its stdin when the user submits one from the Web UI.
   - Research areas: how Claude Code reads stdin, whether it accepts input when in the idle/prompt-waiting state, and whether there are any APIs or IPC mechanisms that could be leveraged.
-- [ ] **Add "Clear Context and Edit" shortcut (Shift+Tab) to ExitPlanMode card**
+- [ ] *(on hold)* **Add "Clear Context and Edit" shortcut (Shift+Tab) to ExitPlanMode card**
   - When an ExitPlanMode approval card is shown in the Web UI, add a keyboard shortcut (Shift+Tab) or button that triggers the "Clear context and edit" action.
   - This mirrors the Shift+Tab behavior available in the Claude Code CLI terminal.
   - Allows the user to clear the current context and re-edit the plan directly from the Web UI without switching back to the terminal.
@@ -104,3 +104,6 @@ A web-based approval UI for Claude Code permission hooks. Provides a browser int
 - [x] **Increase spacing between "Show more" button and quick-action buttons (e.g., /clear)**
   - On mobile especially, the "Show more" toggle and quick-action buttons like "/clear" are too close together, leading to accidental taps.
   - Add more vertical margin/padding between the detail section (including its "Show more" button) and the quick-action button area to prevent mis-taps.
+- [ ] **Bug: "Allow Path" button click has no effect in Web UI**
+  - When clicking the "Allow Path" option on Write/Edit tool approval cards, nothing happens.
+  - Investigate why the click handler is not working and fix the issue.

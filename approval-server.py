@@ -855,7 +855,7 @@ function toggleSplitPatterns(reqId) {
   if (!req || !req.allow_patterns) return;
   let html = '';
   req.allow_patterns.forEach(pat => {
-    html += '<div class="path-option" onclick="submitPathAllow(\'' + reqId + '\',\'' + esc(pat).replace(/'/g, "\\\\'") + '\')">'
+    html += '<div class="path-option" onclick="submitPathAllow(\\'' + reqId + '\\',\\'' + esc(pat).replace(/'/g, "\\\\'") + '\\')">'
       + '<div class="path-label">Allow: <code>' + esc(pat) + '</code></div>'
       + '</div>';
   });

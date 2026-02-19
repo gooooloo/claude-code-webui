@@ -61,9 +61,11 @@ Claude Code session                  Web browser
    /path/to/claude-code-permission-web-approver/install.sh
    ```
 
-4. Open `http://localhost:19836` in your browser (or use your machine's LAN IP from a phone/tablet).
+4. **Restart Claude Code** if it's already running — hooks are loaded at startup and won't take effect until the next session.
 
-5. Run Claude Code — permission requests will appear in the web UI instead of the terminal.
+5. Open `http://localhost:19836` in your browser (or use your machine's LAN IP from a phone/tablet).
+
+6. Run Claude Code — permission requests will appear in the web UI instead of the terminal.
 
 ## Security note
 

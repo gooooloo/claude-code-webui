@@ -608,11 +608,11 @@ function renderRequests(requests) {
           <div class="detail">${detailHtml}</div>
           ${req.detail_sub ? '<div class="detail" style="margin-top:8px;color:#aaa;font-size:12px">' + esc(req.detail_sub) + '</div>' : ''}
           <div class="allow-info">"Always Allow" will apply to: <code>${esc(req.allow_pattern)}</code></div>
-          <div class="allow-info">"Allow this session" will auto-approve all <code>${esc(req.tool_name)}</code> calls in session ${esc(String(req.session_id))}</div>
+          ${['Read','Edit','Write'].includes(req.tool_name) ? '<div class="allow-info">"Allow this session" will auto-approve all <code>' + esc(req.tool_name) + '</code> calls in session ' + esc(String(req.session_id)) + '</div>' : ''}
           <div class="buttons">
             <button class="${denyClass}" onclick="respond('${req.id}','deny',this)">Deny</button>
             <button class="btn-always" onclick="respond('${req.id}','always',this)">Always Allow</button>
-            <button class="btn-session" onclick="respondSessionAllow('${req.id}','${req.session_id}','${req.tool_name}',this)">Allow this session</button>
+            ${['Read','Edit','Write'].includes(req.tool_name) ? '<button class="btn-session" onclick="respondSessionAllow(\'' + req.id + '\',\'' + req.session_id + '\',\'' + req.tool_name + '\',this)">Allow this session</button>' : ''}
             <button class="${allowClass}" onclick="respond('${req.id}','allow',this)">Allow</button>
           </div>`;
       }

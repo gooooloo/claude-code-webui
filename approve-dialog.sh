@@ -94,6 +94,9 @@ REQUEST_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null
 REQUEST_FILE="$QUEUE_DIR/$REQUEST_ID.request.json"
 RESPONSE_FILE="$QUEUE_DIR/$REQUEST_ID.response.json"
 
+# Clean up request file on exit (e.g. if Claude Code kills this hook process)
+trap 'rm -f "$REQUEST_FILE"' EXIT
+
 # Write request to queue
 jq -n \
   --arg id "$REQUEST_ID" \

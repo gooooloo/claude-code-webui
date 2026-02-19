@@ -463,6 +463,25 @@ HTML_PAGE = """<!DOCTYPE html>
     border-color: #10b981;
   }
   .prompt-input::placeholder { color: #555; }
+  .quick-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .btn-quick {
+    background: #1e1e3a;
+    border: 1px solid #2a2a4a;
+    color: #ccc;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-quick:hover { background: #2a2a4a; color: #fff; }
+  .btn-quick:active { transform: scale(0.97); }
   .btn-submit-prompt {
     background: #10b981;
     color: white;
@@ -630,11 +649,33 @@ function renderPromptCard(req, time) {
     <div class="project-path">${esc(req.project_dir || '')}</div>
     <div class="prompt-text">Claude has finished and is waiting for your next instruction.</div>
     ${responseHtml}
+    <div class="quick-actions">
+      <button class="btn-quick" onclick="quickPrompt('${req.id}','/clear')">/clear</button>
+      <button class="btn-quick" onclick="quickPrompt('${req.id}','Implement the next TODO item from PRD.md')">Next TODO</button>
+      <button class="btn-quick" onclick="quickPrompt('${req.id}','Commit the current changes and push to GitHub')">Push to GitHub</button>
+    </div>
     <textarea class="prompt-input" id="prompt-input-${req.id}" placeholder="Type your next instruction for Claude..." rows="3"></textarea>
     <div class="buttons">
       <button class="btn-dismiss" onclick="dismissPrompt('${req.id}',this)">Dismiss</button>
       <button class="btn-submit-prompt" onclick="submitPrompt('${req.id}')">Submit</button>
     </div>`;
+}
+
+async function quickPrompt(id, prompt) {
+  const card = document.getElementById('card-' + id);
+  card.querySelectorAll('button, textarea').forEach(el => el.disabled = true);
+  try {
+    await fetch('/api/submit-prompt', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, prompt})
+    });
+    respondedIds.add(id);
+    knownIds.delete(id);
+    card.remove();
+  } catch (e) {
+    card.querySelectorAll('button, textarea').forEach(el => el.disabled = false);
+  }
 }
 
 async function submitPrompt(id) {

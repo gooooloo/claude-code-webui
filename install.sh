@@ -11,7 +11,7 @@ HOOKS_DIR="$HOME/.claude/hooks"
 
 # Create symlinks in ~/.claude/hooks/ so settings.json doesn't contain user-specific paths
 mkdir -p "$HOOKS_DIR"
-for script in approve-dialog.sh post-cleanup.sh stop-hook.sh; do
+for script in approve-dialog.sh post-cleanup.sh stop-hook.sh user-prompt-hook.sh; do
   ln -sf "$SHARED_DIR/$script" "$HOOKS_DIR/$script"
 done
 echo "Symlinked hooks to: $HOOKS_DIR"
@@ -50,6 +50,18 @@ HOOKS_CONFIG='{
           "type": "command",
           "command": "bash \"$HOME/.claude/hooks/stop-hook.sh\"",
           "timeout": 86400
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"$HOME/.claude/hooks/user-prompt-hook.sh\"",
+          "timeout": 5
         }
       ]
     }

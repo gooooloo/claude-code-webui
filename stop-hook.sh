@@ -39,30 +39,68 @@ for old_file in "$QUEUE_DIR"/*.prompt-waiting.json; do
   fi
 done
 
-# Clean up on exit
-trap 'rm -f "$WAITING_FILE"' EXIT
+# Detect tmux mode
+TMUX_MODE="false"
+TMUX_PANE_ID=""
+if [ -n "$TMUX" ] && [ -n "$TMUX_PANE" ]; then
+  TMUX_MODE="true"
+  TMUX_PANE_ID="$TMUX_PANE"
+fi
+
+# Clean up on exit (only for non-tmux mode; tmux mode exits immediately)
+if [ "$TMUX_MODE" = "false" ]; then
+  trap 'rm -f "$WAITING_FILE"' EXIT
+fi
 
 # Write waiting marker to queue
-jq -n \
-  --arg id "$REQUEST_ID" \
-  --arg type "prompt-waiting" \
-  --arg timestamp "$(date +%s)" \
-  --arg pid "$$" \
-  --arg session_id "$PPID" \
-  --arg project_dir "$PROJECT_DIR" \
-  --arg last_response "$LAST_RESPONSE" \
-  '{
-    id: $id,
-    type: $type,
-    timestamp: ($timestamp | tonumber),
-    pid: ($pid | tonumber),
-    session_id: ($session_id | tonumber),
-    project_dir: $project_dir,
-    last_response: $last_response
-  }' > "$WAITING_FILE"
+if [ "$TMUX_MODE" = "true" ]; then
+  jq -n \
+    --arg id "$REQUEST_ID" \
+    --arg type "prompt-waiting" \
+    --arg timestamp "$(date +%s)" \
+    --arg pid "$$" \
+    --arg session_id "$PPID" \
+    --arg project_dir "$PROJECT_DIR" \
+    --arg last_response "$LAST_RESPONSE" \
+    --arg tmux_pane "$TMUX_PANE_ID" \
+    '{
+      id: $id,
+      type: $type,
+      timestamp: ($timestamp | tonumber),
+      pid: ($pid | tonumber),
+      session_id: ($session_id | tonumber),
+      project_dir: $project_dir,
+      last_response: $last_response,
+      tmux_mode: true,
+      tmux_pane: $tmux_pane
+    }' > "$WAITING_FILE"
+else
+  jq -n \
+    --arg id "$REQUEST_ID" \
+    --arg type "prompt-waiting" \
+    --arg timestamp "$(date +%s)" \
+    --arg pid "$$" \
+    --arg session_id "$PPID" \
+    --arg project_dir "$PROJECT_DIR" \
+    --arg last_response "$LAST_RESPONSE" \
+    '{
+      id: $id,
+      type: $type,
+      timestamp: ($timestamp | tonumber),
+      pid: ($pid | tonumber),
+      session_id: ($session_id | tonumber),
+      project_dir: $project_dir,
+      last_response: $last_response
+    }' > "$WAITING_FILE"
+fi
 
+# Tmux mode: approve immediately (Claude shows > prompt, Web UI uses send-keys)
+if [ "$TMUX_MODE" = "true" ]; then
+  jq -n '{ decision: "approve" }'
+  exit 0
+fi
 
-# Poll for response (prompt submission or dismiss)
+# Non-tmux mode: poll for response (prompt submission or dismiss)
 TIMEOUT=86400
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do

@@ -13,6 +13,7 @@ import json
 import glob
 import os
 import signal
+import subprocess
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -1337,6 +1338,41 @@ def _is_pid_alive(pid):
         return False
 
 
+def _is_tmux_pane_alive(pane_id):
+    """Check if a tmux pane still exists."""
+    try:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", pane_id],
+            capture_output=True, timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _tmux_send_prompt(pane_id, prompt):
+    """Send a prompt to a tmux pane using load-buffer + paste-buffer + Enter."""
+    try:
+        # Load prompt into tmux buffer via stdin
+        subprocess.run(
+            ["tmux", "load-buffer", "-"],
+            input=prompt.encode(), capture_output=True, timeout=5
+        )
+        # Paste buffer into the target pane and delete the buffer
+        subprocess.run(
+            ["tmux", "paste-buffer", "-t", pane_id, "-d"],
+            capture_output=True, timeout=5
+        )
+        # Send Enter to submit
+        subprocess.run(
+            ["tmux", "send-keys", "-t", pane_id, "Enter"],
+            capture_output=True, timeout=5
+        )
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
 class ApprovalHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suppress default logging
@@ -1379,10 +1415,17 @@ class ApprovalHandler(BaseHTTPRequestHandler):
                     resp_path = path.replace(".prompt-waiting.json", ".prompt-response.json")
                     if os.path.exists(resp_path):
                         continue
-                    pid = data.get("pid")
-                    if pid and not _is_pid_alive(pid):
-                        os.remove(path)
-                        continue
+                    # Liveness check: tmux mode checks pane, non-tmux checks pid
+                    if data.get("tmux_mode"):
+                        tmux_pane = data.get("tmux_pane", "")
+                        if tmux_pane and not _is_tmux_pane_alive(tmux_pane):
+                            os.remove(path)
+                            continue
+                    else:
+                        pid = data.get("pid")
+                        if pid and not _is_pid_alive(pid):
+                            os.remove(path)
+                            continue
                     requests.append(data)
                 except (json.JSONDecodeError, IOError):
                     continue
@@ -1480,10 +1523,31 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             if not os.path.exists(waiting_file):
                 self.send_error(404, "Prompt request not found")
                 return
-            response_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-response.json")
-            with open(response_file, "w") as f:
-                json.dump({"action": "submit", "prompt": prompt}, f)
-            print(f"[>] Prompt submitted for {request_id}: {prompt[:80]}")
+            # Read waiting file to check tmux mode
+            try:
+                with open(waiting_file) as f:
+                    waiting_data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                waiting_data = {}
+            if waiting_data.get("tmux_mode"):
+                # Tmux mode: send prompt via tmux send-keys
+                tmux_pane = waiting_data.get("tmux_pane", "")
+                if tmux_pane and _tmux_send_prompt(tmux_pane, prompt):
+                    # Clean up waiting file (UserPromptSubmit hook also cleans as backup)
+                    try:
+                        os.remove(waiting_file)
+                    except OSError:
+                        pass
+                    print(f"[>] Prompt sent via tmux to {tmux_pane}: {prompt[:80]}")
+                else:
+                    self.send_error(500, "Failed to send prompt via tmux")
+                    return
+            else:
+                # Non-tmux mode: write response file for hook to pick up
+                response_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-response.json")
+                with open(response_file, "w") as f:
+                    json.dump({"action": "submit", "prompt": prompt}, f)
+                print(f"[>] Prompt submitted for {request_id}: {prompt[:80]}")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -1496,9 +1560,23 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             if not os.path.exists(waiting_file):
                 self.send_error(404, "Prompt request not found")
                 return
-            response_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-response.json")
-            with open(response_file, "w") as f:
-                json.dump({"action": "dismiss"}, f)
+            # Read waiting file to check tmux mode
+            try:
+                with open(waiting_file) as f:
+                    waiting_data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                waiting_data = {}
+            if waiting_data.get("tmux_mode"):
+                # Tmux mode: just remove waiting file (Claude stays at > prompt)
+                try:
+                    os.remove(waiting_file)
+                except OSError:
+                    pass
+            else:
+                # Non-tmux mode: write dismiss response for hook to pick up
+                response_file = os.path.join(QUEUE_DIR, f"{request_id}.prompt-response.json")
+                with open(response_file, "w") as f:
+                    json.dump({"action": "dismiss"}, f)
             print(f"[x] Prompt dismissed for {request_id}")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

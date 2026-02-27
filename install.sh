@@ -11,7 +11,7 @@ HOOKS_DIR="$HOME/.claude/hooks"
 
 # Create symlinks in ~/.claude/hooks/ so settings.json doesn't contain user-specific paths
 mkdir -p "$HOOKS_DIR"
-for script in approve-dialog.sh post-cleanup.sh stop-hook.sh user-prompt-hook.sh session-hook.sh; do
+for script in permission-request.sh post-tool-use.sh stop.sh user-prompt-submit.sh session-start.sh; do
   ln -sf "$SHARED_DIR/$script" "$HOOKS_DIR/$script"
 done
 echo "Symlinked hooks to: $HOOKS_DIR"
@@ -24,7 +24,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/approve-dialog.sh\"",
+          "command": "bash \"$HOME/.claude/hooks/permission-request.sh\"",
           "timeout": 86400
         }
       ]
@@ -36,7 +36,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/post-cleanup.sh\"",
+          "command": "bash \"$HOME/.claude/hooks/post-tool-use.sh\"",
           "timeout": 5
         }
       ]
@@ -48,7 +48,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/stop-hook.sh\"",
+          "command": "bash \"$HOME/.claude/hooks/stop.sh\"",
           "timeout": 86400
         }
       ]
@@ -60,7 +60,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/user-prompt-hook.sh\"",
+          "command": "bash \"$HOME/.claude/hooks/user-prompt-submit.sh\"",
           "timeout": 5
         }
       ]
@@ -72,7 +72,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/session-hook.sh\"",
+          "command": "bash \"$HOME/.claude/hooks/session-start.sh\"",
           "timeout": 5
         }
       ]

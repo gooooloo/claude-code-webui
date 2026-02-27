@@ -9,7 +9,7 @@ A web-based approval UI for [Claude Code](https://docs.anthropic.com/en/docs/cla
 Claude Code                          Web browser
       |                                   |
       |-- PermissionRequest hook ------>  |
-      |   (approve-dialog.sh)             |
+      |   (permission-request.sh)             |
       |   writes .request.json to         |
       |   /tmp/claude-approvals/          |
       |                                   |
@@ -28,7 +28,7 @@ Claude Code                          Web browser
 Claude Code                          Web browser
       |                                   |
       |-- Stop hook fires                 |
-      |   (stop-hook.sh)                  |
+      |   (stop.sh)                  |
       |   writes .prompt-waiting.json     |
       |                                   |
       |          approval-server.py       |
@@ -42,11 +42,11 @@ Claude Code                          Web browser
 
 ### Components
 
-1. **`approve-dialog.sh`** — `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-approvals/`, and polls for a `.response.json`.
+1. **`permission-request.sh`** — `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-approvals/`, and polls for a `.response.json`.
 2. **`approval-server.py`** — Python HTTP server (port 19836). Serves a single-page UI that shows pending requests and lets you approve/deny them.
-3. **`post-cleanup.sh`** — `PostToolUse` hook. Cleans up stale request/response files after a tool finishes executing.
-4. **`stop-hook.sh`** — `Stop` hook. When Claude finishes a task, writes a `.prompt-waiting.json` so the Web UI can accept a follow-up prompt.
-5. **`user-prompt-hook.sh`** — `UserPromptSubmit` hook. Cleans up waiting files when a prompt is submitted (from terminal or tmux send-keys).
+3. **`post-tool-use.sh`** — `PostToolUse` hook. Cleans up stale request/response files after a tool finishes executing.
+4. **`stop.sh`** — `Stop` hook. When Claude finishes a task, writes a `.prompt-waiting.json` so the Web UI can accept a follow-up prompt.
+5. **`user-prompt-submit.sh`** — `UserPromptSubmit` hook. Cleans up waiting files when a prompt is submitted (from terminal or tmux send-keys).
 6. **`install.sh`** — Registers the hooks in a project's `.claude/settings.json`.
 
 ## Features
@@ -102,10 +102,10 @@ Each hook's behavior depends on whether the approval server is running and wheth
 
 | Hook | Trigger | Non-tmux + Server Online | Non-tmux + Server Offline | tmux + Server Online | tmux + Server Offline | Timeout |
 |------|---------|--------------------------|---------------------------|----------------------|-----------------------|---------|
-| **PermissionRequest** (`approve-dialog.sh`) | Claude requests tool permission | Write request file → poll for approval → allow/deny | Allow immediately, no file written | Same as non-tmux | Allow immediately, no file written | 24h |
-| **PostToolUse** (`post-cleanup.sh`) | After tool execution | Clean up request/response files | Same (local files only) | Same | Same | 5s |
-| **Stop** (`stop-hook.sh`) | Claude is about to stop | Write waiting file → poll for new prompt → block/approve | Approve immediately, no file written | Write waiting file → approve immediately (Web UI uses tmux send-keys) | Approve immediately, no file written | 24h |
-| **UserPromptSubmit** (`user-prompt-hook.sh`) | User submits a prompt | Clean up waiting files for current session | Same (local files only) | Same | Same | 5s |
+| **PermissionRequest** (`permission-request.sh`) | Claude requests tool permission | Write request file → poll for approval → allow/deny | Allow immediately, no file written | Same as non-tmux | Allow immediately, no file written | 24h |
+| **PostToolUse** (`post-tool-use.sh`) | After tool execution | Clean up request/response files | Same (local files only) | Same | Same | 5s |
+| **Stop** (`stop.sh`) | Claude is about to stop | Write waiting file → poll for new prompt → block/approve | Approve immediately, no file written | Write waiting file → approve immediately (Web UI uses tmux send-keys) | Approve immediately, no file written | 24h |
+| **UserPromptSubmit** (`user-prompt-submit.sh`) | User submits a prompt | Clean up waiting files for current session | Same (local files only) | Same | Same | 5s |
 
 When the approval server is offline, all hooks gracefully fall back to non-blocking behavior — permissions are auto-allowed and stop hooks approve immediately — so Claude Code works normally without the web UI.
 

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/approve-dialog.sh\"",
+            "command": "bash \"$HOME/.claude/hooks/permission-request.sh\"",
             "timeout": 86400
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/post-cleanup.sh\"",
+            "command": "bash \"$HOME/.claude/hooks/post-tool-use.sh\"",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/stop-hook.sh\"",
+            "command": "bash \"$HOME/.claude/hooks/stop.sh\"",
             "timeout": 86400
           }
         ]
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/user-prompt-hook.sh\"",
+            "command": "bash \"$HOME/.claude/hooks/user-prompt-submit.sh\"",
             "timeout": 5
           }
         ]
@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.claude/hooks/session-hook.sh\"",
+            "command": "bash \"$HOME/.claude/hooks/session-start.sh\"",
             "timeout": 5
           }
         ]

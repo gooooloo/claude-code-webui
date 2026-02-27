@@ -1629,6 +1629,43 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True}).encode())
+        elif self.path == "/api/session-end":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            sid = str(body.get("session_id", ""))
+            if not sid:
+                self.send_error(400, "Missing session_id")
+                return
+            # Clear session auto-allow rules
+            keys_to_remove = [k for k in session_auto_allow if k[0] == sid]
+            for k in keys_to_remove:
+                del session_auto_allow[k]
+            if keys_to_remove:
+                print(f"[~] Cleared {len(keys_to_remove)} session auto-allow rule(s) for session {sid}")
+            # Delete all request/response files for this session (no hooks are polling anymore)
+            deleted = 0
+            for pattern, resp_suffix in [("*.request.json", ".response.json"), ("*.prompt-waiting.json", ".prompt-response.json")]:
+                for path in glob.glob(os.path.join(QUEUE_DIR, pattern)):
+                    try:
+                        with open(path) as f:
+                            data = json.load(f)
+                        if str(data.get("session_id", "")) == sid:
+                            resp_path = path.replace(pattern.lstrip("*"), resp_suffix)
+                            rm_count = 0
+                            if os.path.exists(path):
+                                os.remove(path)
+                                rm_count += 1
+                            if os.path.exists(resp_path):
+                                os.remove(resp_path)
+                                rm_count += 1
+                            deleted += rm_count
+                    except (json.JSONDecodeError, IOError):
+                        continue
+            print(f"[*] Session end: session={sid}, deleted {deleted} file(s)")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}).encode())
         elif self.path == "/api/upload-image":
             os.makedirs(IMAGE_DIR, exist_ok=True)
             content_type = self.headers.get("Content-Type", "")

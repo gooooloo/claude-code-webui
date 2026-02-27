@@ -10,12 +10,13 @@ A web-based approval UI for Claude Code permission requests. Instead of the defa
 
 ## Architecture
 
-- **approval-server.py** — Python HTTP server (port 19836) with the entire web UI embedded as a single `HTML_PAGE` triple-quoted string. Handles API endpoints (`/api/pending`, `/api/respond`, `/api/submit-prompt`, `/api/session-allow`, `/api/session-reset`, `/api/upload-image`, etc.) and runs a background auto-approve thread for session-level rules.
+- **approval-server.py** — Python HTTP server (port 19836) with the entire web UI embedded as a single `HTML_PAGE` triple-quoted string. Handles API endpoints (`/api/pending`, `/api/respond`, `/api/submit-prompt`, `/api/session-allow`, `/api/session-reset`, `/api/session-end`, `/api/upload-image`, etc.) and runs a background auto-approve thread for session-level rules.
 - **permission-request.sh** — `PermissionRequest` hook. Parses tool calls, checks `settings.local.json` for pre-approved glob patterns, falls back to auto-allow if server is offline, otherwise queues a request JSON and polls for response.
 - **stop.sh** — `Stop` hook. In non-tmux mode, polls for prompt submission from the web UI. In tmux mode, writes a marker and returns immediately (the UI delivers prompts via `tmux send-keys`).
 - **post-tool-use.sh** — `PostToolUse` hook. Cleans up stale request/response files after tool execution.
 - **user-prompt-submit.sh** — `UserPromptSubmit` hook. Cleans up `.prompt-waiting.json` files when user submits a prompt.
 - **session-start.sh** — `SessionStart` hook. Notifies the approval server on session start/reset (startup, resume, clear, compact) so it can clear stale requests and session auto-allow rules.
+- **session-end.sh** — `SessionEnd` hook. Aggressively cleans up when a session terminates: notifies the server to clear auto-allow rules and delete all files for this session, with local fallback cleanup if the server is offline.
 - **install.sh** — Installs symlinks and merges hook config into a project's `.claude/settings.json`.
 
 ## Running

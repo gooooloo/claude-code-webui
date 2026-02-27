@@ -6,7 +6,7 @@
 #   1. Creates symlinks in ~/.claude/hooks/ pointing to the hook scripts in this repo
 #   2. Merges (or creates) .claude/settings.json in the project with hook configuration
 #      that tells Claude Code to call these scripts on PermissionRequest, PostToolUse,
-#      Stop, UserPromptSubmit, and SessionStart events
+#      Stop, UserPromptSubmit, SessionStart, and SessionEnd events
 #
 # Usage: /path/to/install.sh   (run from project root)
 # Deps:  jq
@@ -20,7 +20,7 @@ HOOKS_DIR="$HOME/.claude/hooks"
 
 # Create symlinks in ~/.claude/hooks/ so settings.json doesn't contain user-specific paths
 mkdir -p "$HOOKS_DIR"
-for script in permission-request.sh post-tool-use.sh stop.sh user-prompt-submit.sh session-start.sh; do
+for script in permission-request.sh post-tool-use.sh stop.sh user-prompt-submit.sh session-start.sh session-end.sh; do
   ln -sf "$SHARED_DIR/$script" "$HOOKS_DIR/$script"
 done
 echo "Symlinked hooks to: $HOOKS_DIR"
@@ -82,6 +82,18 @@ HOOKS_CONFIG='{
         {
           "type": "command",
           "command": "bash \"$HOME/.claude/hooks/session-start.sh\"",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash \"$HOME/.claude/hooks/session-end.sh\"",
           "timeout": 5
         }
       ]

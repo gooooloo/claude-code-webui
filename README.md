@@ -63,7 +63,7 @@ Claude Code                          Web browser
 3. **`post-tool-use.sh`** — `PostToolUse` hook. Cleans up stale request/response files after a tool finishes executing.
 4. **`stop.sh`** — `Stop` hook. When Claude finishes a task, writes a `.prompt-waiting.json` so the Web UI can accept a follow-up prompt.
 5. **`user-prompt-submit.sh`** — `UserPromptSubmit` hook. Cleans up waiting files when a prompt is submitted (from terminal or tmux send-keys).
-6. **`install.sh`** — Registers the hooks in a project's `.claude/settings.json`.
+6. **`install.sh`** — Registers the hooks in a project's `.claude/settings.json` (or `~/.claude/settings.json` with `--global`).
 
 ## Features
 
@@ -101,9 +101,13 @@ Claude Code                          Web browser
    /path/to/claude-code-webui/server.py
    ```
 
-3. In any project directory, install the hooks:
+3. Install the hooks:
    ```bash
+   # For a single project (run from project directory):
    /path/to/claude-code-webui/install.sh
+
+   # Or install globally (all projects):
+   /path/to/claude-code-webui/install.sh --global
    ```
 
 4. **Restart Claude Code** if it's already running — hooks are loaded at startup and won't take effect until the next session.

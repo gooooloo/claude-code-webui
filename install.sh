@@ -4,19 +4,29 @@
 # Run this script from the root of a project to install the web-approval hooks.
 # It does two things:
 #   1. Creates symlinks in ~/.claude/hooks/ pointing to the hook scripts in this repo
-#   2. Merges (or creates) .claude/settings.json in the project with hook configuration
-#      that tells Claude Code to call these scripts on PermissionRequest, PostToolUse,
-#      Stop, UserPromptSubmit, SessionStart, and SessionEnd events
+#   2. Merges (or creates) a settings.json with hook configuration that tells Claude Code
+#      to call these scripts on PermissionRequest, PostToolUse, Stop, UserPromptSubmit,
+#      SessionStart, and SessionEnd events
 #
-# Usage: /path/to/install.sh   (run from project root)
+# By default, hooks are installed into the project's .claude/settings.json.
+# Use --global to install into ~/.claude/settings.json (applies to all projects).
+#
+# Usage: /path/to/install.sh [--global]   (run from project root, or anywhere with --global)
 # Deps:  jq
 
 set -e
 
 SHARED_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(pwd)"
-SETTINGS_FILE="$PROJECT_DIR/.claude/settings.json"
 HOOKS_DIR="$HOME/.claude/hooks"
+
+GLOBAL_MODE=false
+if [ "$1" = "--global" ]; then
+  GLOBAL_MODE=true
+  SETTINGS_FILE="$HOME/.claude/settings.json"
+else
+  SETTINGS_FILE="$PROJECT_DIR/.claude/settings.json"
+fi
 
 # Create symlinks in ~/.claude/hooks/ so settings.json doesn't contain user-specific paths
 mkdir -p "$HOOKS_DIR"
@@ -101,7 +111,11 @@ HOOKS_CONFIG='{
   ]
 }'
 
-mkdir -p "$PROJECT_DIR/.claude"
+if [ "$GLOBAL_MODE" = true ]; then
+  mkdir -p "$HOME/.claude"
+else
+  mkdir -p "$PROJECT_DIR/.claude"
+fi
 
 if [ -f "$SETTINGS_FILE" ]; then
   # Merge hooks into existing settings
@@ -114,6 +128,10 @@ else
   echo "Created: $SETTINGS_FILE"
 fi
 
-echo "WebUI hooks installed for: $PROJECT_DIR"
+if [ "$GLOBAL_MODE" = true ]; then
+  echo "WebUI hooks installed globally (all projects)"
+else
+  echo "WebUI hooks installed for: $PROJECT_DIR"
+fi
 echo "Start the server: python3 $SHARED_DIR/server.py"
 echo "Then open: http://localhost:19836"

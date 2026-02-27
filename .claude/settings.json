@@ -47,6 +47,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/session-hook.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

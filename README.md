@@ -1,6 +1,6 @@
-# claude-code-permission-web-approver
+# claude-code-webui
 
-A web-based approval UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) permission requests. Approve or deny tool calls from your phone, tablet, or any browser on your network.
+A web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that replaces default terminal prompts with a browser-based interface. Approve/deny tool calls, submit prompts, upload images, and manage sessions from your phone, tablet, or any browser on your network.
 
 ## How it works
 
@@ -11,9 +11,9 @@ Claude Code                          Web browser
       |-- PermissionRequest hook ------>  |
       |   (permission-request.sh)             |
       |   writes .request.json to         |
-      |   /tmp/claude-approvals/          |
+      |   /tmp/claude-webui/              |
       |                                   |
-      |          approval-server.py       |
+      |          server.py                |
       |          polls queue dir          |
       |          serves web UI  --------> |  User sees request
       |                                   |  clicks Allow / Deny
@@ -31,7 +31,7 @@ Claude Code                          Web browser
       |   (stop.sh)                  |
       |   writes .prompt-waiting.json     |
       |                                   |
-      |          approval-server.py       |
+      |          server.py                |
       |          shows prompt input  ---> |  User types new prompt
       |                                   |  clicks Submit
       |          writes .prompt-response  |
@@ -42,8 +42,8 @@ Claude Code                          Web browser
 
 ### Components
 
-1. **`permission-request.sh`** — `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-approvals/`, and polls for a `.response.json`.
-2. **`approval-server.py`** — Python HTTP server (port 19836). Serves a single-page UI that shows pending requests and lets you approve/deny them.
+1. **`permission-request.sh`** — `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-webui/`, and polls for a `.response.json`.
+2. **`server.py`** — Python HTTP server (port 19836). Serves a single-page UI that shows pending requests and lets you approve/deny them.
 3. **`post-tool-use.sh`** — `PostToolUse` hook. Cleans up stale request/response files after a tool finishes executing.
 4. **`stop.sh`** — `Stop` hook. When Claude finishes a task, writes a `.prompt-waiting.json` so the Web UI can accept a follow-up prompt.
 5. **`user-prompt-submit.sh`** — `UserPromptSubmit` hook. Cleans up waiting files when a prompt is submitted (from terminal or tmux send-keys).
@@ -77,17 +77,17 @@ Claude Code                          Web browser
 
 1. Clone this repo anywhere you like:
    ```bash
-   git clone https://github.com/gooooloo/claude-code-permission-web-approver.git
+   git clone https://github.com/gooooloo/claude-code-webui.git
    ```
 
-2. Start the approval server:
+2. Start the server:
    ```bash
-   /path/to/claude-code-permission-web-approver/approval-server.py
+   /path/to/claude-code-webui/server.py
    ```
 
 3. In any project directory, install the hooks:
    ```bash
-   /path/to/claude-code-permission-web-approver/install.sh
+   /path/to/claude-code-webui/install.sh
    ```
 
 4. **Restart Claude Code** if it's already running — hooks are loaded at startup and won't take effect until the next session.
@@ -98,7 +98,7 @@ Claude Code                          Web browser
 
 ## Hook behavior matrix
 
-Each hook's behavior depends on whether the approval server is running and whether Claude Code is inside a tmux session:
+Each hook's behavior depends on whether the server is running and whether Claude Code is inside a tmux session:
 
 | Hook | Trigger | Non-tmux + Server Online | Non-tmux + Server Offline | tmux + Server Online | tmux + Server Offline | Timeout |
 |------|---------|--------------------------|---------------------------|----------------------|-----------------------|---------|
@@ -107,11 +107,11 @@ Each hook's behavior depends on whether the approval server is running and wheth
 | **Stop** (`stop.sh`) | Claude is about to stop | Write waiting file → poll for new prompt → block/approve | Approve immediately, no file written | Write waiting file → approve immediately (Web UI uses tmux send-keys) | Approve immediately, no file written | 24h |
 | **UserPromptSubmit** (`user-prompt-submit.sh`) | User submits a prompt | Clean up waiting files for current session | Same (local files only) | Same | Same | 5s |
 
-When the approval server is offline, all hooks gracefully fall back to non-blocking behavior — permissions are auto-allowed and stop hooks approve immediately — so Claude Code works normally without the web UI.
+When the server is offline, all hooks gracefully fall back to non-blocking behavior — permissions are auto-allowed and stop hooks approve immediately — so Claude Code works normally without the web UI.
 
 ## Security note
 
-The server binds to `0.0.0.0:19836` by default, making it accessible from your local network. This is intentional — it allows you to approve requests from a phone or another device. If you only need local access, change the bind address to `127.0.0.1` in `approval-server.py`.
+The server binds to `0.0.0.0:19836` by default, making it accessible from your local network. This is intentional — it allows you to approve requests from a phone or another device. If you only need local access, change the bind address to `127.0.0.1` in `server.py`.
 
 There is no authentication on the web UI. Anyone on your network who can reach port 19836 can approve or deny requests. Use on trusted networks only, or add your own auth layer.
 

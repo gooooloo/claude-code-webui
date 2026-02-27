@@ -2,7 +2,7 @@
 # SessionStart hook for Claude Code
 #
 # Called on session lifecycle events: startup, resume, /clear, /compact.
-# Sends a POST to the approval server's /api/session-reset endpoint so it can:
+# Sends a POST to the server's /api/session-reset endpoint so it can:
 #   - Clear stale .request.json / .prompt-waiting.json files for this session
 #   - Reset session-level auto-allow rules stored in server memory
 #
@@ -23,13 +23,13 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // "unknown"')
 
 SERVER="http://localhost:19836"
 
-# Notify the approval server (fire-and-forget; silently ignore if server is offline)
+# Notify the server (fire-and-forget; silently ignore if server is offline)
 curl -s -o /dev/null --max-time 2 \
   -X POST "$SERVER/api/session-reset" \
   -H "Content-Type: application/json" \
   -d "{\"session_id\":\"${SESSION_ID}\",\"source\":\"${SOURCE}\"}" 2>/dev/null || true
 
-QUEUE_DIR="/tmp/claude-approvals"
+QUEUE_DIR="/tmp/claude-webui"
 
 # In tmux mode after /clear, re-create a prompt-waiting card so the web UI
 # shows the prompt input (Stop hook doesn't fire after /clear).

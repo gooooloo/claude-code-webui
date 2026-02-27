@@ -7,15 +7,15 @@
 #   1. Reads tool_name and tool_input from stdin (JSON)
 #   2. Builds a human-readable detail string and allow_pattern per tool type
 #   3. Checks settings.local.json for pre-approved glob patterns — if matched, auto-allows
-#   4. Checks if the approval server (port 19836) is reachable — if not, auto-allows (fallback)
-#   5. Writes a .request.json file to /tmp/claude-approvals/ and polls for a .response.json
+#   4. Checks if the server (port 19836) is reachable — if not, auto-allows (fallback)
+#   5. Writes a .request.json file to /tmp/claude-webui/ and polls for a .response.json
 #   6. When the user approves/denies via the Web UI, outputs the decision JSON to stdout
 #   7. On timeout (24h), denies the request
 #
 # Input:  JSON on stdin with { tool_name, tool_input }
 # Output: JSON on stdout with { hookSpecificOutput: { decision: { behavior: "allow"|"deny" } } }
 
-QUEUE_DIR="/tmp/claude-approvals"
+QUEUE_DIR="/tmp/claude-webui"
 mkdir -p "$QUEUE_DIR"
 
 # Settings file is in the project's .claude/ directory, not the shared hooks dir
@@ -173,7 +173,7 @@ if [ -f "$SETTINGS_FILE" ]; then
   fi
 fi
 
-# Check if the approval server is running before waiting for approval
+# Check if the server is running before waiting for approval
 if ! curl -s --max-time 2 http://localhost:19836/ > /dev/null 2>&1; then
   # Server not running, allow directly to avoid blocking Claude
   jq -n '{

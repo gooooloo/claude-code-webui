@@ -3,7 +3,7 @@
 #
 # Called when Claude finishes a task and is about to return control to the user.
 # Instead of stopping immediately, this hook writes a .prompt-waiting.json marker
-# to /tmp/claude-approvals/ so the Web UI can show a "submit new prompt" card.
+# to /tmp/claude-webui/ so the Web UI can show a "submit new prompt" card.
 #
 # Flow:
 #   1. Guards against re-entrant calls (CLAUDE_STOP_HOOK_ACTIVE env var)
@@ -19,7 +19,7 @@
 # Input:  JSON on stdin with { last_assistant_message }
 # Output: JSON on stdout with { decision: "approve"|"block", reason? }
 
-QUEUE_DIR="/tmp/claude-approvals"
+QUEUE_DIR="/tmp/claude-webui"
 mkdir -p "$QUEUE_DIR"
 
 # If already inside a stop-hook continuation, just approve to avoid infinite loops
@@ -62,7 +62,7 @@ if [ -n "$TMUX" ] && [ -n "$TMUX_PANE" ]; then
   TMUX_PANE_ID="$TMUX_PANE"
 fi
 
-# Check if the approval server is running before doing anything
+# Check if the server is running before doing anything
 if ! curl -s --max-time 2 http://localhost:19836/ > /dev/null 2>&1; then
   # Server not running, no point waiting — approve immediately
   jq -n '{ decision: "approve" }'

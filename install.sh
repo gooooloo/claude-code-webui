@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installer for Claude Code approval hooks
+# Installer for Claude Code WebUI hooks
 #
 # Run this script from the root of a project to install the web-approval hooks.
 # It does two things:
@@ -114,6 +114,6 @@ else
   echo "Created: $SETTINGS_FILE"
 fi
 
-echo "Approval hooks installed for: $PROJECT_DIR"
-echo "Start the server: python3 $SHARED_DIR/approval-server.py"
+echo "WebUI hooks installed for: $PROJECT_DIR"
+echo "Start the server: python3 $SHARED_DIR/server.py"
 echo "Then open: http://localhost:19836"

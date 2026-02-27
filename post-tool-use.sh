@@ -2,7 +2,7 @@
 # PostToolUse hook for Claude Code
 #
 # Called after Claude finishes executing a tool. Cleans up the matching
-# .request.json and .response.json files from /tmp/claude-approvals/ so the
+# .request.json and .response.json files from /tmp/claude-webui/ so the
 # Web UI no longer shows the completed request.
 #
 # Matching strategy:
@@ -12,7 +12,7 @@
 #
 # Input:  JSON on stdin with { tool_name, tool_input }
 # Output: (none)
-QUEUE_DIR="/tmp/claude-approvals"
+QUEUE_DIR="/tmp/claude-webui"
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')

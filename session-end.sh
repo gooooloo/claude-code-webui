@@ -14,10 +14,10 @@
 # Output: (none)
 
 SESSION_ID="${PPID}"
-QUEUE_DIR="/tmp/claude-approvals"
+QUEUE_DIR="/tmp/claude-webui"
 SERVER="http://localhost:19836"
 
-# Notify the approval server (fire-and-forget)
+# Notify the server (fire-and-forget)
 curl -s -o /dev/null --max-time 2 \
   -X POST "$SERVER/api/session-end" \
   -H "Content-Type: application/json" \

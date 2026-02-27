@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Claude Code Permission Approval Web Server
+Claude Code WebUI Server
 
-Watches /tmp/claude-approvals/ for permission requests from the hook script,
+Watches /tmp/claude-webui/ for permission requests from the hook script,
 serves a web UI for the user to approve/deny, and writes responses back.
 
-Usage: python3 approval-server.py
+Usage: python3 server.py
 Then open http://localhost:19836
 """
 
@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 import uuid
 import cgi
 
-QUEUE_DIR = "/tmp/claude-approvals"
+QUEUE_DIR = "/tmp/claude-webui"
 IMAGE_DIR = "/tmp/claude-images"
 PORT = 19836
 
@@ -63,7 +63,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Code Approvals</title>
+<title>Claude Code WebUI</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -595,7 +595,7 @@ HTML_PAGE = """<!DOCTYPE html>
 </head>
 <body>
 <h1>
-  Claude Code Approvals
+  Claude Code WebUI
   <span class="status" id="status">Connected</span>
 </h1>
 <div id="requests"></div>
@@ -862,7 +862,7 @@ function renderRequests(requests) {
   lastPending = requests;
   const container = document.getElementById('requests');
   if (requests.length === 0) {
-    container.innerHTML = '<div class="empty"><span class="dot"></span>Waiting for permission requests...</div>';
+    container.innerHTML = '<div class="empty"><span class="dot"></span>Waiting for requests...</div>';
     knownIds.clear();
     return;
   }
@@ -1373,7 +1373,7 @@ def _tmux_send_prompt(pane_id, prompt):
         return False
 
 
-class ApprovalHandler(BaseHTTPRequestHandler):
+class WebUIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suppress default logging
         pass
@@ -1723,8 +1723,8 @@ def main():
     # Start background thread for auto-allow checks (independent of web UI)
     t = threading.Thread(target=auto_allow_loop, daemon=True)
     t.start()
-    server = HTTPServer(("0.0.0.0", PORT), ApprovalHandler)
-    print(f"Claude Code Approval Server running on http://localhost:{PORT}")
+    server = HTTPServer(("0.0.0.0", PORT), WebUIHandler)
+    print(f"Claude Code WebUI Server running on http://localhost:{PORT}")
     print(f"Watching: {QUEUE_DIR}")
     print("Press Ctrl+C to stop")
     try:

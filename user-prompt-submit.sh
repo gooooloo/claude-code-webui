@@ -8,7 +8,7 @@
 # Input:  (stdin JSON, unused)
 # Output: (none)
 
-QUEUE_DIR="/tmp/claude-approvals"
+QUEUE_DIR="/tmp/claude-webui"
 
 # Session ID is the PPID (the Claude Code process)
 SESSION_ID="$PPID"

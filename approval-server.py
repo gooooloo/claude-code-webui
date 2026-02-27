@@ -1582,6 +1582,53 @@ class ApprovalHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True}).encode())
+        elif self.path == "/api/session-reset":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            sid = str(body.get("session_id", ""))
+            source = body.get("source", "unknown")
+            if not sid:
+                self.send_error(400, "Missing session_id")
+                return
+            # Clear session auto-allow rules for this session
+            keys_to_remove = [k for k in session_auto_allow if k[0] == sid]
+            for k in keys_to_remove:
+                del session_auto_allow[k]
+            if keys_to_remove:
+                print(f"[~] Cleared {len(keys_to_remove)} session auto-allow rule(s) for session {sid}")
+            # Write deny responses for pending requests of this session (so polling hooks exit cleanly)
+            for path in glob.glob(os.path.join(QUEUE_DIR, "*.request.json")):
+                resp_path = path.replace(".request.json", ".response.json")
+                if os.path.exists(resp_path):
+                    continue
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    if str(data.get("session_id", "")) == sid:
+                        with open(resp_path, "w") as f:
+                            json.dump({"decision": "deny", "message": "Session reset"}, f)
+                        print(f"[~] Denied stale request {data.get('id', '?')} (session reset)")
+                except (json.JSONDecodeError, IOError):
+                    continue
+            # Write dismiss responses for prompt-waiting files of this session
+            for path in glob.glob(os.path.join(QUEUE_DIR, "*.prompt-waiting.json")):
+                resp_path = path.replace(".prompt-waiting.json", ".prompt-response.json")
+                if os.path.exists(resp_path):
+                    continue
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    if str(data.get("session_id", "")) == sid:
+                        with open(resp_path, "w") as f:
+                            json.dump({"action": "dismiss"}, f)
+                        print(f"[~] Dismissed stale prompt {data.get('id', '?')} (session reset)")
+                except (json.JSONDecodeError, IOError):
+                    continue
+            print(f"[*] Session reset: session={sid} source={source}")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True}).encode())
         elif self.path == "/api/upload-image":
             os.makedirs(IMAGE_DIR, exist_ok=True)
             content_type = self.headers.get("Content-Type", "")

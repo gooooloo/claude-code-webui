@@ -1,7 +1,15 @@
 #!/bin/bash
-# SessionStart hook — notifies the approval server when a session starts/resets.
-# Triggered on: startup, resume, clear, compact.
-# This allows the server to clean up stale requests and session-level auto-allow rules.
+# SessionStart hook for Claude Code
+#
+# Called on session lifecycle events: startup, resume, /clear, /compact.
+# Sends a POST to the approval server's /api/session-reset endpoint so it can:
+#   - Clear stale .request.json / .prompt-waiting.json files for this session
+#   - Reset session-level auto-allow rules stored in server memory
+#
+# Fire-and-forget: silently ignores errors if the server is offline.
+#
+# Input:  JSON on stdin with { source: "startup"|"resume"|"clear"|"compact" }
+# Output: (none)
 
 INPUT=$(cat)
 

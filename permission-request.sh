@@ -1,6 +1,19 @@
 #!/bin/bash
-# Async permission hook for Claude Code
-# Writes request to queue directory, polls for response from web UI
+# PermissionRequest hook for Claude Code
+#
+# Called before Claude executes a tool that requires permission (Bash, Write, Edit, etc.).
+#
+# Flow:
+#   1. Reads tool_name and tool_input from stdin (JSON)
+#   2. Builds a human-readable detail string and allow_pattern per tool type
+#   3. Checks settings.local.json for pre-approved glob patterns — if matched, auto-allows
+#   4. Checks if the approval server (port 19836) is reachable — if not, auto-allows (fallback)
+#   5. Writes a .request.json file to /tmp/claude-approvals/ and polls for a .response.json
+#   6. When the user approves/denies via the Web UI, outputs the decision JSON to stdout
+#   7. On timeout (24h), denies the request
+#
+# Input:  JSON on stdin with { tool_name, tool_input }
+# Output: JSON on stdout with { hookSpecificOutput: { decision: { behavior: "allow"|"deny" } } }
 
 QUEUE_DIR="/tmp/claude-approvals"
 mkdir -p "$QUEUE_DIR"

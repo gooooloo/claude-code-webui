@@ -1,8 +1,12 @@
 #!/bin/bash
 # UserPromptSubmit hook for Claude Code
-# Triggered when the user submits a prompt (either via terminal or tmux send-keys).
-# Cleans up any .prompt-waiting.json files belonging to this session,
-# so the Web UI card disappears once Claude starts processing.
+#
+# Called when the user submits a prompt (either typed in terminal or sent via
+# tmux send-keys from the Web UI). Cleans up any .prompt-waiting.json files
+# belonging to this session so the Web UI "waiting for prompt" card disappears.
+#
+# Input:  (stdin JSON, unused)
+# Output: (none)
 
 QUEUE_DIR="/tmp/claude-approvals"
 

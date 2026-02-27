@@ -1,8 +1,23 @@
 #!/bin/bash
 # Stop hook for Claude Code
-# Detects when Claude finishes a task and waits for a new prompt from the Web UI.
-# If the user submits a prompt, blocks the stop and passes the prompt as a systemMessage.
-# If dismissed or timed out, allows Claude to stop normally.
+#
+# Called when Claude finishes a task and is about to return control to the user.
+# Instead of stopping immediately, this hook writes a .prompt-waiting.json marker
+# to /tmp/claude-approvals/ so the Web UI can show a "submit new prompt" card.
+#
+# Flow:
+#   1. Guards against re-entrant calls (CLAUDE_STOP_HOOK_ACTIVE env var)
+#   2. Reads last_assistant_message from stdin JSON
+#   3. Kills any older stop-hook instances from the same session (PPID)
+#   4. If server is offline → approve immediately (let Claude stop)
+#   5. Writes .prompt-waiting.json to the queue directory
+#   6. Tmux mode: approve immediately (Web UI delivers prompts via tmux send-keys)
+#      Non-tmux mode: poll for .prompt-response.json up to 24h
+#   7. If user submits a prompt → block the stop with a systemMessage
+#      If dismissed or timed out → approve (let Claude stop)
+#
+# Input:  JSON on stdin with { last_assistant_message }
+# Output: JSON on stdout with { decision: "approve"|"block", reason? }
 
 QUEUE_DIR="/tmp/claude-approvals"
 mkdir -p "$QUEUE_DIR"

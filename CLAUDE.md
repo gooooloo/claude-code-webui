@@ -55,5 +55,8 @@ Detected via `$TMUX` and `$TMUX_PANE` env vars. Prompts are delivered via `tmux 
 ### Server Offline Fallback
 All hooks auto-approve when the server is unreachable, so Claude Code continues to function normally.
 
+### Header Comments in Hook Scripts
+Each hook script (`*.sh`) has a detailed header comment describing its purpose, flow, inputs, and outputs. When modifying a script's behavior, update its header comment to stay in sync.
+
 ## Writing Conventions
 - All changes to `PRD.md` must be written in English.

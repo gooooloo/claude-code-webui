@@ -1,6 +1,15 @@
 #!/bin/bash
-# Install Claude Code approval hooks into the current project
-# Usage: ~/.claude/claude-code-permission-web-approver/install.sh
+# Installer for Claude Code approval hooks
+#
+# Run this script from the root of a project to install the web-approval hooks.
+# It does two things:
+#   1. Creates symlinks in ~/.claude/hooks/ pointing to the hook scripts in this repo
+#   2. Merges (or creates) .claude/settings.json in the project with hook configuration
+#      that tells Claude Code to call these scripts on PermissionRequest, PostToolUse,
+#      Stop, UserPromptSubmit, and SessionStart events
+#
+# Usage: /path/to/install.sh   (run from project root)
+# Deps:  jq
 
 set -e
 

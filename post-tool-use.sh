@@ -1,5 +1,17 @@
 #!/bin/bash
-# Cleanup matching request files after tool execution
+# PostToolUse hook for Claude Code
+#
+# Called after Claude finishes executing a tool. Cleans up the matching
+# .request.json and .response.json files from /tmp/claude-approvals/ so the
+# Web UI no longer shows the completed request.
+#
+# Matching strategy:
+#   1. Exact match — both tool_name and tool_input match → delete and exit
+#   2. Fallback — only tool_name matches (for tools like AskUserQuestion where
+#      tool_input in PostToolUse includes answers not present in the original request)
+#
+# Input:  JSON on stdin with { tool_name, tool_input }
+# Output: (none)
 QUEUE_DIR="/tmp/claude-approvals"
 
 INPUT=$(cat)

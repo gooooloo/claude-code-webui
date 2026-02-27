@@ -26,6 +26,22 @@ usage() {
   exit 1
 }
 
+prompt_scope() {
+  echo "Select uninstall scope:"
+  echo "  1) project  — Remove hooks from <cwd>/.claude/settings.json"
+  echo "  2) global   — Remove hooks from ~/.claude/settings.json + symlinks"
+  echo "  3) all      — Remove both project and global"
+  echo ""
+  printf "Enter choice [1-3]: "
+  read -r choice
+  case "$choice" in
+    1) DO_PROJECT=true ;;
+    2) DO_GLOBAL=true ;;
+    3) DO_PROJECT=true; DO_GLOBAL=true ;;
+    *) echo "Invalid choice"; exit 1 ;;
+  esac
+}
+
 DO_PROJECT=false
 DO_GLOBAL=false
 
@@ -33,6 +49,7 @@ case "${1:-}" in
   --project) DO_PROJECT=true ;;
   --global)  DO_GLOBAL=true ;;
   --all)     DO_PROJECT=true; DO_GLOBAL=true ;;
+  "")        prompt_scope ;;
   *)         usage ;;
 esac
 

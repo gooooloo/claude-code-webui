@@ -4,43 +4,72 @@ A web-based approval UI for [Claude Code](https://docs.anthropic.com/en/docs/cla
 
 ## How it works
 
+**Permission approval flow:**
 ```
-Claude Code session                  Web browser
+Claude Code                          Web browser
       |                                   |
-      |-- hook fires ------------------>  |
+      |-- PermissionRequest hook ------>  |
       |   (approve-dialog.sh)             |
-      |                                   |
-      |   writes request to               |
+      |   writes .request.json to         |
       |   /tmp/claude-approvals/          |
       |                                   |
       |          approval-server.py       |
       |          polls queue dir          |
       |          serves web UI  --------> |  User sees request
       |                                   |  clicks Allow / Deny
-      |          writes response <------- |
+      |          writes .response.json <--|
       |                                   |
       |<-- hook reads response            |
       |   (allow or deny)                 |
 ```
 
-1. **`approve-dialog.sh`** — Claude Code `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-approvals/`, and polls for a `.response.json`.
+**Prompt submission flow (when Claude is idle):**
+```
+Claude Code                          Web browser
+      |                                   |
+      |-- Stop hook fires                 |
+      |   (stop-hook.sh)                  |
+      |   writes .prompt-waiting.json     |
+      |                                   |
+      |          approval-server.py       |
+      |          shows prompt input  ---> |  User types new prompt
+      |                                   |  clicks Submit
+      |          writes .prompt-response  |
+      |                                   |
+      |<-- hook reads response            |
+      |   (blocks stop, passes prompt)    |
+```
+
+### Components
+
+1. **`approve-dialog.sh`** — `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-approvals/`, and polls for a `.response.json`.
 2. **`approval-server.py`** — Python HTTP server (port 19836). Serves a single-page UI that shows pending requests and lets you approve/deny them.
-3. **`post-cleanup.sh`** — `PostToolUse` hook. Cleans up stale request files after a tool finishes executing.
-4. **`install.sh`** — Registers the hooks in a project's `.claude/settings.json`.
+3. **`post-cleanup.sh`** — `PostToolUse` hook. Cleans up stale request/response files after a tool finishes executing.
+4. **`stop-hook.sh`** — `Stop` hook. When Claude finishes a task, writes a `.prompt-waiting.json` so the Web UI can accept a follow-up prompt.
+5. **`user-prompt-hook.sh`** — `UserPromptSubmit` hook. Cleans up waiting files when a prompt is submitted (from terminal or tmux send-keys).
+6. **`install.sh`** — Registers the hooks in a project's `.claude/settings.json`.
 
 ## Features
 
-- **Allow** — approve a single tool call
-- **Always Allow** — approve and add the pattern to the project's `settings.local.json` so it won't ask again
-- **Deny** — reject the tool call
+- **Allow / Deny** — approve or reject individual tool calls
+- **Always Allow** — approve and add the pattern to `settings.local.json` so it won't ask again
+- **Allow Path** — for Write/Edit tools, allow all operations under a directory with hierarchical selection
+- **Split Always Allow** — compound Bash commands (pipes and `&&`) are split into individual patterns
+- **Session-level auto-allow** — server-side evaluation with multi-select support
+- **Prompt submission** — submit follow-up prompts from the Web UI when Claude is idle
+- **tmux mode** — in tmux sessions, prompts are delivered via `send-keys` for seamless operation
+- **AskUserQuestion support** — answer Claude's questions with option selection or custom text
+- **Image upload** — attach images in the Web UI prompt area
+- **WebFetch/WebSearch** — permission handling for web access tools
+- **Graceful fallback** — when the server is offline, all hooks auto-approve so Claude Code works normally
 - Auto-cleanup of stale requests (dead processes)
 - Dark-themed, mobile-friendly UI
-- No dependencies beyond Python 3 standard library
 
 ## Requirements
 
 - Python 3
 - `jq`
+- `curl`
 - Bash
 - `uuidgen` (available by default on macOS; install `uuid-runtime` on Debian/Ubuntu)
 
@@ -66,6 +95,19 @@ Claude Code session                  Web browser
 5. Open `http://localhost:19836` in your browser (or use your machine's LAN IP from a phone/tablet).
 
 6. Run Claude Code — permission requests will appear in the web UI instead of the terminal.
+
+## Hook behavior matrix
+
+Each hook's behavior depends on whether the approval server is running and whether Claude Code is inside a tmux session:
+
+| Hook | Trigger | Non-tmux + Server Online | Non-tmux + Server Offline | tmux + Server Online | tmux + Server Offline | Timeout |
+|------|---------|--------------------------|---------------------------|----------------------|-----------------------|---------|
+| **PermissionRequest** (`approve-dialog.sh`) | Claude requests tool permission | Write request file → poll for approval → allow/deny | Allow immediately, no file written | Same as non-tmux | Allow immediately, no file written | 24h |
+| **PostToolUse** (`post-cleanup.sh`) | After tool execution | Clean up request/response files | Same (local files only) | Same | Same | 5s |
+| **Stop** (`stop-hook.sh`) | Claude is about to stop | Write waiting file → poll for new prompt → block/approve | Approve immediately, no file written | Write waiting file → approve immediately (Web UI uses tmux send-keys) | Approve immediately, no file written | 24h |
+| **UserPromptSubmit** (`user-prompt-hook.sh`) | User submits a prompt | Clean up waiting files for current session | Same (local files only) | Same | Same | 5s |
+
+When the approval server is offline, all hooks gracefully fall back to non-blocking behavior — permissions are auto-allowed and stop hooks approve immediately — so Claude Code works normally without the web UI.
 
 ## Security note
 

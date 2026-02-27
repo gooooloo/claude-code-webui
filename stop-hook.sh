@@ -47,6 +47,13 @@ if [ -n "$TMUX" ] && [ -n "$TMUX_PANE" ]; then
   TMUX_PANE_ID="$TMUX_PANE"
 fi
 
+# Check if the approval server is running before doing anything
+if ! curl -s --max-time 2 http://localhost:19836/ > /dev/null 2>&1; then
+  # Server not running, no point waiting — approve immediately
+  jq -n '{ decision: "approve" }'
+  exit 0
+fi
+
 # Clean up on exit (only for non-tmux mode; tmux mode exits immediately)
 if [ "$TMUX_MODE" = "false" ]; then
   trap 'rm -f "$WAITING_FILE"' EXIT
@@ -100,7 +107,7 @@ if [ "$TMUX_MODE" = "true" ]; then
   exit 0
 fi
 
-# Non-tmux mode: poll for response (prompt submission or dismiss)
+# Poll for response (prompt submission or dismiss)
 TIMEOUT=86400
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do

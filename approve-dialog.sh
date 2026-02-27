@@ -160,6 +160,18 @@ if [ -f "$SETTINGS_FILE" ]; then
   fi
 fi
 
+# Check if the approval server is running before waiting for approval
+if ! curl -s --max-time 2 http://localhost:19836/ > /dev/null 2>&1; then
+  # Server not running, allow directly to avoid blocking Claude
+  jq -n '{
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "allow" }
+    }
+  }'
+  exit 0
+fi
+
 # Generate unique request ID
 REQUEST_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)
 REQUEST_FILE="$QUEUE_DIR/$REQUEST_ID.request.json"

@@ -565,95 +565,70 @@ def _notification_loop():
 
 
 def _scan_once():
-    """Single scan iteration."""
+    """Single scan iteration — aligned with /api/pending logic from WebUI."""
     global _target_open_id
 
     if _target_open_id is None:
         return
 
-    # Track which request IDs still have files on disk
-    active_ids = set()
-
-    # Take a snapshot of notified set under lock
     with _lock:
         notified_snapshot = set(_notified)
 
-    # 1. Permission requests
+    # Stage 1: Build pending set (same criteria as /api/pending)
+    pending = {}  # request_id → (data, type)
+
     for path in glob.glob(os.path.join(QUEUE_DIR, "*.request.json")):
         request_id = os.path.basename(path).replace(".request.json", "")
-        active_ids.add(request_id)
-        response_file = path.replace(".request.json", ".response.json")
-
-        if request_id in notified_snapshot:
-            # Check if resolved by another channel (web UI)
-            if os.path.exists(response_file):
-                with _lock:
-                    mid = _card_ids.get(request_id)
-                if mid:
-                    _delete_message(mid)
-                    with _lock:
-                        _card_ids.pop(request_id, None)
-                with _lock:
-                    _notified.discard(request_id)
+        resp = path.replace(".request.json", ".response.json")
+        if os.path.exists(resp):
             continue
-
-        # New request — send card
-        if os.path.exists(response_file):
-            continue  # Already responded before we saw it
-
         try:
             with open(path) as f:
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
             continue
+        pending[request_id] = (data, "permission")
 
-        card = _build_permission_card(request_id, data)
-        mid = _send_card(_target_open_id, card)
-        with _lock:
-            _notified.add(request_id)
-            if mid:
-                _card_ids[request_id] = mid
-
-    # 2. Prompt-waiting requests
     for path in glob.glob(os.path.join(QUEUE_DIR, "*.prompt-waiting.json")):
         request_id = os.path.basename(path).replace(".prompt-waiting.json", "")
-        active_ids.add(request_id)
-        response_file = path.replace(".prompt-waiting.json", ".prompt-response.json")
-
-        if request_id in notified_snapshot:
-            if os.path.exists(response_file):
-                with _lock:
-                    mid = _card_ids.get(request_id)
-                if mid:
-                    _delete_message(mid)
-                    with _lock:
-                        _card_ids.pop(request_id, None)
-                with _lock:
-                    _notified.discard(request_id)
+        resp = path.replace(".prompt-waiting.json", ".prompt-response.json")
+        if os.path.exists(resp):
             continue
-
-        if os.path.exists(response_file):
-            continue
-
         try:
             with open(path) as f:
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
             continue
+        pending[request_id] = (data, "prompt")
 
-        card = _build_prompt_card(request_id, data)
+    pending_ids = set(pending.keys())
+
+    # Stage 2a: Resolved requests → delete cards
+    # (anything previously notified but no longer pending, regardless of reason)
+    resolved = notified_snapshot - pending_ids
+    resolved_mids = []
+    with _lock:
+        for rid in resolved:
+            mid = _card_ids.pop(rid, None)
+            if mid:
+                resolved_mids.append(mid)
+            _notified.discard(rid)
+    for mid in resolved_mids:
+        _delete_message(mid)
+
+    # Stage 2b: New requests → send cards
+    for rid, (data, rtype) in pending.items():
+        if rid in notified_snapshot:
+            continue
+        if rtype == "permission":
+            card = _build_permission_card(rid, data)
+        else:
+            card = _build_prompt_card(rid, data)
         mid = _send_card(_target_open_id, card)
         with _lock:
-            _notified.add(request_id)
+            _notified.add(rid)
             if mid:
-                _card_ids[request_id] = mid
-
-    # 3. Clean up stale tracking entries (files deleted)
-    with _lock:
-        stale = _notified - active_ids
-        for rid in stale:
-            _notified.discard(rid)
-            _card_ids.pop(rid, None)
+                _card_ids[rid] = mid
 
 
 # ── Public entry point ──

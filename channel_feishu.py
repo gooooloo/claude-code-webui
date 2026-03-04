@@ -250,31 +250,6 @@ def _build_prompt_card(request_id, data):
     }
 
 
-def _build_resolved_card(tool_name, decision):
-    """Build a simplified card showing the resolution status."""
-    if decision in ("allow", "always"):
-        status = "Approved ✓"
-        template = "green"
-    elif decision == "dismiss":
-        status = "Dismissed"
-        template = "grey"
-    else:
-        status = "Denied ✗"
-        template = "red"
-
-    label = tool_name if tool_name else "Prompt"
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": f"{label} — {status}"},
-            "template": template
-        },
-        "elements": [
-            {"tag": "markdown", "content": f"**Status:** {status}"}
-        ]
-    }
-
-
 # ── Feishu API helpers ──
 
 def _send_card(open_id, card_content):
@@ -301,23 +276,18 @@ def _send_card(open_id, card_content):
         return None
 
 
-def _update_card(message_id, card_content):
-    """Update an existing card message."""
+def _delete_message(message_id):
+    """Delete a message by message_id."""
     import lark_oapi as lark
-    from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+    from lark_oapi.api.im.v1 import DeleteMessageRequest
 
-    body = PatchMessageRequestBody.builder() \
-        .content(json.dumps(card_content)) \
-        .build()
-
-    request = PatchMessageRequest.builder() \
+    request = DeleteMessageRequest.builder() \
         .message_id(message_id) \
-        .request_body(body) \
         .build()
 
-    response = _client.im.v1.message.patch(request)
+    response = _client.im.v1.message.delete(request)
     if not response.success():
-        print(f"[feishu] Failed to update card: {response.code} {response.msg}")
+        print(f"[feishu] Failed to delete message: {response.code} {response.msg}")
 
 
 def _reply_text(message_id, text):
@@ -452,7 +422,7 @@ def _handle_message(data):
             with _lock:
                 mid = _card_ids.get(request_id)
             if mid:
-                _update_card(mid, _build_resolved_card(None, "allow"))
+                _delete_message(mid)
 
             if message_id:
                 _reply_text(message_id, f"Prompt sent to Claude.")
@@ -555,7 +525,7 @@ def _handle_permission_action(request_id, decision, value):
     with _lock:
         mid = _card_ids.get(request_id)
     if mid:
-        _update_card(mid, _build_resolved_card(tool_name, decision))
+        _delete_message(mid)
 
     label = "Allowed" if decision in ("allow", "always") else "Denied"
     return P2CardActionTriggerResponse({"toast": {"type": "success", "content": label}})
@@ -577,7 +547,7 @@ def _handle_prompt_action(request_id, decision):
     with _lock:
         mid = _card_ids.get(request_id)
     if mid:
-        _update_card(mid, _build_resolved_card(None, "dismiss"))
+        _delete_message(mid)
 
     return P2CardActionTriggerResponse({"toast": {"type": "success", "content": "Dismissed"}})
 
@@ -620,24 +590,9 @@ def _scan_once():
                 with _lock:
                     mid = _card_ids.get(request_id)
                 if mid:
-                    # Read response to determine status
-                    try:
-                        with open(response_file) as f:
-                            resp = json.load(f)
-                        decision = resp.get("decision", "deny")
-                    except (json.JSONDecodeError, IOError):
-                        decision = "unknown"
-                    # Read tool name
-                    tool_name = ""
-                    try:
-                        with open(path) as f:
-                            tool_name = json.load(f).get("tool_name", "")
-                    except (json.JSONDecodeError, IOError):
-                        pass
-                    _update_card(mid, _build_resolved_card(tool_name, decision))
+                    _delete_message(mid)
                     with _lock:
                         _card_ids.pop(request_id, None)
-                # Mark as handled
                 with _lock:
                     _notified.discard(request_id)
             continue
@@ -670,15 +625,7 @@ def _scan_once():
                 with _lock:
                     mid = _card_ids.get(request_id)
                 if mid:
-                    # Read response to determine correct status
-                    try:
-                        with open(response_file) as f:
-                            resp = json.load(f)
-                        action = resp.get("action", "dismiss")
-                        resolved_decision = "allow" if action == "submit" else "dismiss"
-                    except (json.JSONDecodeError, IOError):
-                        resolved_decision = "dismiss"
-                    _update_card(mid, _build_resolved_card(None, resolved_decision))
+                    _delete_message(mid)
                     with _lock:
                         _card_ids.pop(request_id, None)
                 with _lock:

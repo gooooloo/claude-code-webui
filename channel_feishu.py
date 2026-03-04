@@ -59,7 +59,10 @@ def _config_path():
 
 
 def load_config():
-    """Load Feishu config from config.json next to this file."""
+    """Load Feishu config from config.json next to this file.
+
+    Returns the feishu dict (including open_id if previously saved), or None.
+    """
     path = _config_path()
     if not os.path.exists(path):
         return None
@@ -71,6 +74,21 @@ def load_config():
     if not feishu.get("app_id") or not feishu.get("app_secret"):
         return None
     return feishu
+
+
+def _save_open_id(open_id):
+    """Persist open_id to config.json under feishu.open_id."""
+    path = _config_path()
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+        cfg.setdefault("feishu", {})["open_id"] = open_id
+        with open(path, "w") as f:
+            json.dump(cfg, f, indent=2)
+            f.write("\n")
+        print(f"[feishu] Saved open_id to config.json")
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"[feishu] Failed to save open_id: {e}")
 
 
 # ── Card builders ──
@@ -379,6 +397,7 @@ def _handle_message(data):
             newly_connected = True
     if newly_connected:
         print(f"[feishu] Connected to user: {open_id}")
+        _save_open_id(open_id)
         if message_id:
             _reply_text(message_id, "Connected! You will now receive Claude Code notifications here.")
         return
@@ -699,6 +718,8 @@ def start_feishu_channel():
     """
     global _client, _ws_client
 
+    global _target_open_id
+
     cfg = load_config()
     if cfg is None:
         print("[feishu] Disabled (no config.json or feishu.enabled=false)")
@@ -709,6 +730,12 @@ def start_feishu_channel():
     except ImportError:
         print("[feishu] lark-oapi not installed (pip install lark-oapi), skipping")
         return
+
+    # Restore persisted open_id
+    saved_open_id = cfg.get("open_id")
+    if saved_open_id:
+        _target_open_id = saved_open_id
+        print(f"[feishu] Restored open_id from config: {saved_open_id}")
 
     app_id = cfg["app_id"]
     app_secret = cfg["app_secret"]
@@ -748,4 +775,5 @@ def start_feishu_channel():
     notify_thread.start()
 
     print("[feishu] WebSocket client started")
-    print("[feishu] Send any message to the bot from Feishu to connect")
+    if _target_open_id is None:
+        print("[feishu] Send any message to the bot from Feishu to connect")

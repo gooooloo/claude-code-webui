@@ -21,6 +21,12 @@ from urllib.parse import parse_qs, urlparse
 import uuid
 import cgi
 
+try:
+    from channel_feishu import start_feishu_channel
+    _has_feishu = True
+except ImportError:
+    _has_feishu = False
+
 QUEUE_DIR = "/tmp/claude-webui"
 IMAGE_DIR = "/tmp/claude-images"
 PORT = 19836
@@ -1723,6 +1729,11 @@ def main():
     # Start background thread for auto-allow checks (independent of web UI)
     t = threading.Thread(target=auto_allow_loop, daemon=True)
     t.start()
+    if _has_feishu:
+        try:
+            start_feishu_channel()
+        except Exception as e:
+            print(f"[feishu] Failed to start: {e}")
     server = HTTPServer(("0.0.0.0", PORT), WebUIHandler)
     print(f"Claude Code WebUI Server running on http://localhost:{PORT}")
     print(f"Watching: {QUEUE_DIR}")

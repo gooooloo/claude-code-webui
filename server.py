@@ -538,8 +538,8 @@ HTML_PAGE = """<!DOCTYPE html>
     font-weight: 700;
     text-transform: uppercase;
   }
-  .badge-idle { background: #4ade8022; color: #4ade80; }
-  .badge-busy { background: #3b82f622; color: #3b82f6; }
+  .badge-idle { background: hsl(var(--sh,220),60%,50%,0.13); color: hsl(var(--sh,220),60%,60%); }
+  .badge-busy { background: hsl(var(--sh,220),60%,50%,0.13); color: hsl(var(--sh,220),60%,60%); }
   .badge-permission_prompt { background: #ef444422; color: #ef4444; }
   .badge-elicitation { background: #22d3ee22; color: #22d3ee; }
   .badge-plan_review { background: #a78bfa22; color: #a78bfa; }

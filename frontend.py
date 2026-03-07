@@ -637,6 +637,10 @@ let lastTranscriptHash = '';
 const questionSelections = {};
 const questionMultiSelect = {};
 
+const _interactTime = {};
+function touchSession(sid) { _interactTime[sid] = Date.now(); }
+function getInteractTime(sid) { return _interactTime[sid] || 0; }
+
 const _hueCache = {};
 let _hueNext = 0;
 function sessionHue(id) {
@@ -655,22 +659,25 @@ function getCollapsedSet() {
   catch { return new Set(); }
 }
 function isCollapsed(sid) { return getCollapsedSet().has(sid); }
-function toggleCollapse(sid, btn) {
-  const set = getCollapsedSet();
-  if (set.has(sid)) set.delete(sid); else set.add(sid);
-  localStorage.setItem('collapsed_sessions', JSON.stringify([...set]));
-  const card = btn.closest('.session-card');
-  if (card) card.classList.toggle('collapsed');
-  // Re-sort cards: expanded before collapsed, then by activity desc
+function sortDashboardCards() {
   const el = document.getElementById('sessionList');
   const cards = [...el.querySelectorAll('.session-card[data-sid]')];
   cards.sort((a, b) => {
     const ca = a.classList.contains('collapsed') ? 1 : 0;
     const cb = b.classList.contains('collapsed') ? 1 : 0;
     if (ca !== cb) return ca - cb;
-    return (parseFloat(b.getAttribute('data-activity'))||0) - (parseFloat(a.getAttribute('data-activity'))||0);
+    return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
   });
   cards.forEach(c => el.appendChild(c));
+}
+function toggleCollapse(sid, btn) {
+  const set = getCollapsedSet();
+  if (set.has(sid)) set.delete(sid); else set.add(sid);
+  localStorage.setItem('collapsed_sessions', JSON.stringify([...set]));
+  const card = btn.closest('.session-card');
+  if (card) card.classList.toggle('collapsed');
+  touchSession(sid);
+  sortDashboardCards();
   lastDashboardHash = '';
 }
 
@@ -794,7 +801,7 @@ function renderDashboard(sessions) {
     const ca = collapsedSet.has(a.session_id) ? 1 : 0;
     const cb = collapsedSet.has(b.session_id) ? 1 : 0;
     if (ca !== cb) return ca - cb;
-    return (b.last_activity || 0) - (a.last_activity || 0);
+    return getInteractTime(b.session_id) - getInteractTime(a.session_id);
   });
 
   const desiredOrder = sessions.map(s => s.session_id);
@@ -820,7 +827,6 @@ function renderDashboard(sessions) {
       const collapsed = isCollapsed(sid) ? ' collapsed' : '';
       card.className = 'session-card state-' + state + collapsed;
       card.style.cssText = '--sh:' + hue;
-      card.setAttribute('data-activity', s.last_activity || 0);
       // Only update inner content if data changed
       const prev = card.getAttribute('data-hash');
       if (prev !== h) {
@@ -835,7 +841,6 @@ function renderDashboard(sessions) {
       card = document.createElement('div');
       card.setAttribute('data-sid', sid);
       card.setAttribute('data-hash', h);
-      card.setAttribute('data-activity', s.last_activity || 0);
       const collapsed = isCollapsed(sid) ? ' collapsed' : '';
       card.className = 'session-card state-' + state + collapsed;
       card.style.cssText = '--sh:' + hue;
@@ -861,6 +866,7 @@ function renderDashboard(sessions) {
 // ── Session Detail ──
 
 function openSession(sid) {
+  touchSession(sid);
   currentSessionId = sid;
   currentView = 'detail';
   document.getElementById('dashboardView').style.display = 'none';
@@ -1182,6 +1188,8 @@ async function respond(id, decision, btn, message) {
     const card = btn.closest('.perm-card, .session-card, .sc-actions');
     if (card) card.querySelectorAll('button').forEach(b => b.disabled = true);
     btn.textContent = '...';
+    const sc = btn.closest('.session-card[data-sid]');
+    if (sc) touchSession(sc.getAttribute('data-sid'));
   }
   try {
     const body = {id, decision};
@@ -1378,6 +1386,7 @@ async function sendDashboardPrompt(sessionId) {
   const prompt = input.value.trim();
   if (!prompt) { input.focus(); return; }
   input.value = '';
+  touchSession(sessionId);
   try {
     await fetch('/api/send-prompt', {
       method: 'POST',

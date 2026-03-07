@@ -81,7 +81,7 @@ def update_session_state(sid):
     new_entries = []
     bytes_consumed = 0
 
-    for line in lines:
+    for i, line in enumerate(lines):
         if not line.strip():
             bytes_consumed += len(line.encode("utf-8")) + 1
             continue
@@ -90,8 +90,11 @@ def update_session_state(sid):
             new_entries.append(entry)
             bytes_consumed += len(line.encode("utf-8")) + 1
         except (json.JSONDecodeError, ValueError):
-            # Incomplete last line — stop here, will re-read next time
-            break
+            if i == len(lines) - 1:
+                # Last line may be incomplete (still being written) — stop here
+                break
+            # Mid-file bad line — skip it
+            bytes_consumed += len(line.encode("utf-8")) + 1
 
     if not new_entries:
         return

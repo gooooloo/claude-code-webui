@@ -232,6 +232,10 @@ def _derive_state(sid, s):
         if stop_reason == "end_turn" or (not tool_uses and stop_reason != "tool_use"):
             return "idle", summary, user_prompt
 
+    # No assistant message yet — idle if no meaningful user input
+    # (e.g. session just started, or after /clear which only has system XML)
+    if not last_assistant and not user_prompt:
+        return "idle", "", ""
     return "busy", "", user_prompt
 
 

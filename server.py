@@ -172,6 +172,21 @@ def _derive_state(sid, s):
             user_prompt = clean[:200]
             break
 
+    # Check if the last user message is after the last assistant message.
+    # When true, the assistant's summary is stale (from a previous turn).
+    user_after_assistant = False
+    if last_user and last_assistant:
+        for i, entry in enumerate(entries):
+            if entry is last_user:
+                user_idx = i
+            if entry is last_assistant:
+                asst_idx = i
+        user_after_assistant = user_idx > asst_idx
+
+    # Invariant: summary is only shown when it follows the displayed user_prompt
+    if user_after_assistant:
+        return "busy", "", user_prompt
+
     # Extract info from last assistant message
     if last_assistant:
         msg = last_assistant.get("message", {})
@@ -216,18 +231,6 @@ def _derive_state(sid, s):
 
         if stop_reason == "end_turn":
             return "idle", summary, user_prompt
-
-    # Check ordering: if last user message is after last assistant
-    if last_user and last_assistant:
-        user_idx = -1
-        asst_idx = -1
-        for i, entry in enumerate(entries):
-            if entry is last_user:
-                user_idx = i
-            if entry is last_assistant:
-                asst_idx = i
-        if user_idx > asst_idx:
-            return "busy", "", user_prompt
 
     return "busy", "", user_prompt
 

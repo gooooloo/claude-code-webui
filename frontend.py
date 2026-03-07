@@ -662,6 +662,7 @@ function toggleCollapse(sid, btn) {
   const card = btn.closest('.session-card');
   if (card) card.classList.toggle('collapsed');
   lastDashboardHash = '';
+  fetchSessions();
 }
 
 function renderMarkdown(text) {

@@ -1140,15 +1140,12 @@ function renderTranscript(entries) {
       const content = e.message && e.message.content;
       if (!content) return;
       let text = '';
-      let hasToolResult = false;
       if (Array.isArray(content)) {
         content.forEach(c => {
           if (typeof c === 'string') text += c;
           else if (c.type === 'text') text += c.text || '';
-          else if (c.type === 'tool_result') hasToolResult = true;
         });
       }
-      if (hasToolResult) return; // Skip tool result messages
       if (!text.trim()) return;
       html += '<div class="msg msg-user"><div class="msg-label">You</div><div class="msg-content">' + esc(text) + '</div></div>';
     } else if (e.type === 'assistant') {

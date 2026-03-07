@@ -108,6 +108,8 @@ Only used for PermissionRequest blocking:
 | POST | `/api/session-allow` | Session-level auto-allow |
 | POST | `/api/send-prompt` | Send prompt via tmux |
 | POST | `/api/upload-image` | Upload image |
+| POST | `/api/session-reset` | Clear session auto-allow rules (legacy) |
+| POST | `/api/session-end` | Remove session and clear auto-allow (legacy) |
 
 ## Writing Conventions
 - All changes to `PRD.md` must be written in English.

@@ -227,9 +227,9 @@ def _derive_state(sid, s):
             if entry is last_assistant:
                 asst_idx = i
         if user_idx > asst_idx:
-            return "busy", summary, user_prompt
+            return "busy", "", user_prompt
 
-    return "busy", summary, user_prompt
+    return "busy", "", user_prompt
 
 
 def _find_pending_request(sid):

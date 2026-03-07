@@ -945,6 +945,9 @@ HTML_PAGE = """<!DOCTYPE html>
   .md-h1 { color: #a78bfa; font-size: 15px; }
   .md-h2 { color: #c4b5fd; font-size: 14px; }
   .md-h3 { color: #ddd6fe; font-size: 13px; }
+  .md-table { border-collapse: collapse; margin: 6px 0; width: auto; font-size: 12px; white-space: normal; }
+  .md-table th, .md-table td { border: 1px solid #444; padding: 4px 8px; text-align: left; }
+  .md-table th { background: #2a2a3a; font-weight: 600; color: #c4b5fd; }
   code {
     background: #1e1e3a;
     color: #facc15;
@@ -1021,6 +1024,21 @@ function esc(s) {
 
 function renderMarkdown(text) {
   let s = esc(text.trim());
+  // Parse tables before other transformations
+  s = s.replace(/(^\\|.+\\|\\s*\\n\\|[-| :]+\\|\\s*\\n(\\|.+\\|\\s*\\n?)+)/gm, function(table) {
+    const rows = table.trim().split('\\n').filter(r => r.trim());
+    if (rows.length < 2) return table;
+    const parseRow = r => r.replace(/^\\|/, '').replace(/\\|$/, '').split('|').map(c => c.trim());
+    const headers = parseRow(rows[0]);
+    // rows[1] is the separator line, skip it
+    let h = '<table class="md-table"><thead><tr>' + headers.map(c => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>';
+    for (let i = 2; i < rows.length; i++) {
+      const cells = parseRow(rows[i]);
+      h += '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+    }
+    h += '</tbody></table>';
+    return h;
+  });
   s = s.replace(/^### (.+)$/gm, '<span class="md-h3">$1</span>');
   s = s.replace(/^## (.+)$/gm, '<span class="md-h2">$1</span>');
   s = s.replace(/^# (.+)$/gm, '<span class="md-h1">$1</span>');
@@ -1098,7 +1116,7 @@ function renderDashboard(sessions) {
     html += '</div>';
     html += '<div class="sc-sid-row"><span class="sc-sid">Session ' + esc(s.session_id) + '</span></div>';
     if (userPrompt) html += '<div class="sc-user-prompt">' + userPrompt + '</div>';
-    if (summary) html += '<div class="sc-summary">' + summary + '</div>';
+    if (summary) html += '<div class="sc-summary">' + renderMarkdown(s.last_summary || '') + '</div>';
 
     // Inline permission approve/deny on dashboard
     if (state === 'permission_prompt' && s.pending_request) {

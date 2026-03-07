@@ -731,7 +731,7 @@ function renderDashboard(sessions) {
     html += '<span class="sc-project">' + esc(project) + '</span>';
     if (time) html += '<span class="sc-time">' + time + '</span>';
     html += '</div>';
-    html += '<div class="sc-sid-row"><span class="sc-sid">Session ' + esc(s.session_id) + '</span></div>';
+    html += '<div class="sc-sid-row"><span class="sc-sid">' + esc(s.session_id) + '</span></div>';
     if (userPrompt) html += '<div class="sc-user-prompt">' + userPrompt + '</div>';
     if (summary) html += '<div class="sc-summary">' + renderMarkdown(s.last_summary || '') + '</div>';
 

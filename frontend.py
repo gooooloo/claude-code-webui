@@ -659,8 +659,9 @@ function toggleCollapse(sid, btn) {
   const set = getCollapsedSet();
   if (set.has(sid)) set.delete(sid); else set.add(sid);
   localStorage.setItem('collapsed_sessions', JSON.stringify([...set]));
+  const card = btn.closest('.session-card');
+  if (card) card.classList.toggle('collapsed');
   lastDashboardHash = '';
-  poll();
 }
 
 function renderMarkdown(text) {

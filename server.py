@@ -2115,22 +2115,38 @@ def scan_existing_sessions():
                 child_pid = child_pid_str.strip()
                 if not child_pid:
                     continue
+
+                # Get process command line (cross-platform)
                 try:
-                    with open(f"/proc/{child_pid}/comm") as f:
-                        comm = f.read().strip()
+                    ps_result = subprocess.run(
+                        ["ps", "-p", child_pid, "-o", "comm=,args="],
+                        capture_output=True, text=True, timeout=3
+                    )
+                    if ps_result.returncode != 0 or not ps_result.stdout.strip():
+                        continue
+                    ps_line = ps_result.stdout.strip()
+                    comm = ps_line.split()[0].rsplit("/", 1)[-1]  # basename
                     if comm not in ("claude", "node"):
                         continue
-                    with open(f"/proc/{child_pid}/cmdline") as f:
-                        cmdline = f.read()
-                    if "claude" not in cmdline:
+                    if "claude" not in ps_line:
                         continue
-                except (FileNotFoundError, PermissionError):
+                except Exception:
                     continue
 
-                # Get cwd
+                # Get cwd (cross-platform)
                 try:
-                    cwd = os.readlink(f"/proc/{child_pid}/cwd")
-                except (FileNotFoundError, PermissionError):
+                    lsof_result = subprocess.run(
+                        ["lsof", "-p", child_pid, "-Fn", "-a", "-d", "cwd"],
+                        capture_output=True, text=True, timeout=3
+                    )
+                    cwd = None
+                    for lsof_line in lsof_result.stdout.splitlines():
+                        if lsof_line.startswith("n/"):
+                            cwd = lsof_line[1:]
+                            break
+                    if not cwd:
+                        continue
+                except Exception:
                     continue
 
                 # Find transcript: encode cwd to project dir name

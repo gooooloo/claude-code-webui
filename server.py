@@ -201,7 +201,7 @@ def _derive_state(sid, s):
             if isinstance(c, dict) and c.get("type") == "text":
                 text = c.get("text", "")
                 if text:
-                    summary = text[:200]
+                    summary = text
 
         # Check for pending permission request
         pending_request = _find_pending_request(sid)
@@ -469,7 +469,7 @@ HTML_PAGE = """<!DOCTYPE html>
   }
   .header .status {
     font-size: 12px;
-    color: #666;
+    color: #888;
     margin-left: auto;
   }
   .header .back-btn {
@@ -531,7 +531,10 @@ HTML_PAGE = """<!DOCTYPE html>
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 8px;
+    margin-bottom: 2px;
+  }
+  .sc-sid-row {
+    margin-bottom: 6px;
   }
   .state-badge {
     padding: 3px 10px;
@@ -551,33 +554,28 @@ HTML_PAGE = """<!DOCTYPE html>
     color: #e0e0e0;
   }
   .sc-sid {
-    font-size: 11px;
-    color: #666;
-    margin-left: auto;
+    font-size: 12px;
+    color: #888;
   }
   .sc-user-prompt {
-    font-size: 13px;
-    color: #c9d1d9;
-    line-height: 1.5;
-    max-height: 40px;
-    overflow: hidden;
+    font-size: 12px;
+    color: #888;
+    line-height: 1.4;
     margin-bottom: 4px;
   }
   .sc-user-prompt::before {
     content: '> ';
-    color: #58a6ff;
+    color: #888;
   }
   .sc-summary {
-    font-size: 13px;
-    color: #999;
+    font-size: 12px;
+    color: #e0e0e0;
     line-height: 1.5;
-    max-height: 40px;
-    overflow: hidden;
   }
   .sc-time {
-    font-size: 11px;
-    color: #555;
-    margin-top: 6px;
+    font-size: 12px;
+    color: #888;
+    margin-left: auto;
   }
   .sc-actions {
     margin-top: 10px;
@@ -1096,11 +1094,11 @@ function renderDashboard(sessions) {
     html += '<div class="sc-top">';
     html += '<span class="state-badge badge-' + state + '">' + stateLabel(state) + '</span>';
     html += '<span class="sc-project">' + esc(project) + '</span>';
-    html += '<span class="sc-sid">Session ' + esc(s.session_id) + '</span>';
+    if (time) html += '<span class="sc-time">' + time + '</span>';
     html += '</div>';
+    html += '<div class="sc-sid-row"><span class="sc-sid">Session ' + esc(s.session_id) + '</span></div>';
     if (userPrompt) html += '<div class="sc-user-prompt">' + userPrompt + '</div>';
     if (summary) html += '<div class="sc-summary">' + summary + '</div>';
-    if (time) html += '<div class="sc-time">' + time + '</div>';
 
     // Inline permission approve/deny on dashboard
     if (state === 'permission_prompt' && s.pending_request) {

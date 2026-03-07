@@ -128,6 +128,7 @@ HTML_PAGE = """<!DOCTYPE html>
     font-size: 12px;
     color: #e0e0e0;
     line-height: 1.5;
+    white-space: pre-wrap;
   }
   .sc-time {
     font-size: 12px;

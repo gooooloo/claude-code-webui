@@ -459,6 +459,7 @@ HTML_PAGE = """<!DOCTYPE html>
     background: #1a1a2e;
     color: #e0e0e0;
     min-height: 100vh;
+    zoom: 1.2;
   }
   .header {
     padding: 16px 24px;

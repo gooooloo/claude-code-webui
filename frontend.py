@@ -746,13 +746,13 @@ function buildCardHTML(s) {
   const userPrompt = esc(s.last_user_prompt || '');
   const time = s.last_activity ? new Date(s.last_activity * 1000).toLocaleTimeString() : '';
   let html = '<div class="sc-top">';
-  html += '<span class="state-badge badge-' + state + '">' + stateLabel(state) + '</span>';
+  html += '<span class="state-badge badge-' + state + '" style="cursor:pointer" onclick="event.stopPropagation();openSession(\\'' + esc(s.session_id) + '\\')">' + stateLabel(state) + '</span>';
   html += '<span class="sc-project">' + esc(project) + '</span>';
   if (time) html += '<span class="sc-time">' + time + '</span>';
   html += '<button class="sc-collapse-btn" onclick="event.stopPropagation();toggleCollapse(\\'' + esc(s.session_id) + '\\',this)" title="Collapse/Expand">&#9660;</button>';
   html += '</div>';
   html += '<div class="sc-body">';
-  html += '<div class="sc-sid-row"><span class="sc-sid">' + esc(s.session_id) + '</span></div>';
+  html += '<div class="sc-sid-row"><span class="sc-sid" style="cursor:pointer" onclick="event.stopPropagation();openSession(\\'' + esc(s.session_id) + '\\')">' + esc(s.session_id) + '</span></div>';
   if (userPrompt) html += '<div class="sc-user-prompt">' + userPrompt + '</div>';
   if (s.last_summary) html += '<div class="sc-summary">' + renderMarkdown(s.last_summary) + '</div>';
   if (state === 'permission_prompt' && s.pending_request) {
@@ -844,7 +844,6 @@ function renderDashboard(sessions) {
       const collapsed = isCollapsed(sid) ? ' collapsed' : '';
       card.className = 'session-card state-' + state + collapsed;
       card.style.cssText = '--sh:' + hue;
-      card.setAttribute('onclick', 'openSession(\\'' + esc(sid) + '\\')');
       card.innerHTML = buildCardHTML(s);
       el.appendChild(card);
     }

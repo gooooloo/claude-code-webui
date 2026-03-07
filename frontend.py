@@ -574,10 +574,11 @@ let lastTranscriptHash = '';
 const questionSelections = {};
 const questionMultiSelect = {};
 
+const _hueCache = {};
+let _hueNext = 0;
 function sessionHue(id) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffffffff;
-  return ((h % 360) + 360) % 360;
+  if (!(id in _hueCache)) _hueCache[id] = (_hueNext++ * 137.508) % 360;
+  return Math.round(_hueCache[id]);
 }
 
 function esc(s) {

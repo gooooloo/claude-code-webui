@@ -900,12 +900,7 @@ def _scan_once():
             label = _STATE_LABELS.get(state, state)
 
             if state == "idle":
-                summary = s.get("last_summary", "")
-                msg = f"⏸ {label}"
-                if summary:
-                    msg += f"\n{_truncate(summary, 500)}"
-                msg += "\n\nReply in this topic to send a prompt."
-                _reply_post(root_mid, msg)
+                _reply_post(root_mid, f"⏸ {label}\n\nReply in this topic to send a prompt.")
             elif state == "busy" and prev_state == "idle":
                 _reply_post(root_mid, f"▶ {label}")
 

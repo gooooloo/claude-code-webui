@@ -728,14 +728,35 @@ function getCollapsedSet() {
 function isCollapsed(sid) { return getCollapsedSet().has(sid); }
 function sortDashboardCards() {
   const el = document.getElementById('sessionList');
-  const cards = [...el.querySelectorAll('.session-card[data-sid]')];
-  cards.sort((a, b) => {
-    const ca = a.classList.contains('collapsed') ? 1 : 0;
-    const cb = b.classList.contains('collapsed') ? 1 : 0;
-    if (ca !== cb) return ca - cb;
-    return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
-  });
-  cards.forEach(c => el.appendChild(c));
+  if (federationRemoteNames.length > 0) {
+    // Federation mode: sort cards within each machine group
+    const headers = el.querySelectorAll('.machine-group-header[data-machine]');
+    headers.forEach(header => {
+      const cards = [];
+      let sibling = header.nextElementSibling;
+      while (sibling && !sibling.classList.contains('machine-group-header')) {
+        if (sibling.classList.contains('session-card')) cards.push(sibling);
+        sibling = sibling.nextElementSibling;
+      }
+      cards.sort((a, b) => {
+        const ca = a.classList.contains('collapsed') ? 1 : 0;
+        const cb = b.classList.contains('collapsed') ? 1 : 0;
+        if (ca !== cb) return ca - cb;
+        return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
+      });
+      let prev = header;
+      cards.forEach(c => { prev.after(c); prev = c; });
+    });
+  } else {
+    const cards = [...el.querySelectorAll('.session-card[data-sid]')];
+    cards.sort((a, b) => {
+      const ca = a.classList.contains('collapsed') ? 1 : 0;
+      const cb = b.classList.contains('collapsed') ? 1 : 0;
+      if (ca !== cb) return ca - cb;
+      return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
+    });
+    cards.forEach(c => el.appendChild(c));
+  }
 }
 function toggleCollapse(sid, btn) {
   const set = getCollapsedSet();
@@ -983,17 +1004,40 @@ function renderDashboard(sessions) {
       });
     });
 
-    // Build grouped HTML with incremental DOM updates
+    // Incremental DOM updates for federation groups
     const groupOrder = [ln, ...federationRemoteNames.filter(n => n !== ln).sort()];
-    const newHash = sessions.map(s => s.session_id + ':' + cardHash(s)).join('|');
-    if (newHash === lastDashboardHash) return;
 
-    // Build desired DOM structure
     const existingById = {};
     el.querySelectorAll('.session-card[data-sid]').forEach(c => { existingById[c.getAttribute('data-sid')] = c; });
-    const fragment = document.createDocumentFragment();
+    const desiredSids = new Set(sessions.map(s => s.session_id));
+    const desiredMachines = new Set(groupOrder);
+
+    // Remove orphaned elements
+    el.querySelectorAll('.session-card[data-sid]').forEach(c => {
+      if (!desiredSids.has(c.getAttribute('data-sid'))) c.remove();
+    });
+    el.querySelectorAll('.machine-group-header[data-machine]').forEach(h => {
+      if (!desiredMachines.has(h.getAttribute('data-machine'))) h.remove();
+    });
+    el.querySelectorAll('.machine-empty[data-machine]').forEach(e => {
+      if (!desiredMachines.has(e.getAttribute('data-machine'))) e.remove();
+    });
+
+    let prevNode = null;
+    function posAfter(node) {
+      if (!node.parentNode) el.appendChild(node);
+      if (prevNode) {
+        if (node.previousElementSibling !== prevNode) prevNode.after(node);
+      } else {
+        if (node !== el.firstElementChild) el.prepend(node);
+      }
+      prevNode = node;
+    }
+
     groupOrder.forEach(machine => {
       const arr = groups[machine] || [];
+
+      // Header
       let header = el.querySelector('.machine-group-header[data-machine="' + machine + '"]');
       if (!header) {
         header = document.createElement('div');
@@ -1001,10 +1045,12 @@ function renderDashboard(sessions) {
       }
       header.className = 'machine-group-header' + (isMachineCollapsed(machine) ? ' mg-collapsed' : '');
       header.onclick = function() { toggleMachineCollapse(machine); };
-      const cnt = (groups[machine] || []).length;
+      const cnt = arr.length;
       header.innerHTML = '<span class="mg-arrow">&#9660;</span>' + esc(machine) + ' <span style="font-size:11px;opacity:0.5;text-transform:none;font-weight:400">(' + cnt + ')</span>';
-      fragment.appendChild(header);
+      posAfter(header);
+
       const mgHidden = isMachineCollapsed(machine);
+
       if (arr.length === 0) {
         let empty = el.querySelector('.machine-empty[data-machine="' + machine + '"]');
         if (!empty) {
@@ -1014,8 +1060,12 @@ function renderDashboard(sessions) {
           empty.textContent = 'No active sessions';
         }
         empty.style.display = mgHidden ? 'none' : '';
-        fragment.appendChild(empty);
+        posAfter(empty);
+      } else {
+        const empty = el.querySelector('.machine-empty[data-machine="' + machine + '"]');
+        if (empty) empty.remove();
       }
+
       arr.forEach(s => {
         const sid = s.session_id;
         const state = s.state || 'busy';
@@ -1042,11 +1092,14 @@ function renderDashboard(sessions) {
           card.style.cssText = '--sh:' + hue + (mgHidden ? ';display:none' : '');
           card.innerHTML = buildCardHTML(s);
         }
-        fragment.appendChild(card);
+        posAfter(card);
       });
     });
-    el.innerHTML = '';
-    el.appendChild(fragment);
+
+    // Remove any trailing orphaned elements
+    while (prevNode && prevNode.nextElementSibling) {
+      prevNode.nextElementSibling.remove();
+    }
   }
 
   lastDashboardHash = sessions.map(s => s.session_id + ':' + cardHash(s)).join('|');

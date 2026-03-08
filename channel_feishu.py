@@ -125,6 +125,7 @@ def _save_threads():
                 "last_state": t["last_state"],
                 "pending_request_ids": list(t.get("pending_request_ids", set())),
                 "topic_named": t.get("topic_named", False),
+                "created_at": t.get("created_at", ""),
             }
         tmp = _THREADS_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -372,11 +373,13 @@ def _build_permission_resolved_card(request_id, data, decision):
     }
 
 
-def _build_session_root_card(session, subject=None):
+def _build_session_root_card(session, subject=None, created_at=None):
     """Build the root card for a new session topic."""
     project_dir = session.get("cwd", "")
     session_id = session.get("session_id", "")
     project_name = os.path.basename(project_dir) if project_dir else "?"
+    if not created_at:
+        created_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
     elements = [
         {
@@ -390,6 +393,10 @@ def _build_session_root_card(session, subject=None):
         {
             "tag": "markdown",
             "content": f"**Directory:** {project_dir}"
+        },
+        {
+            "tag": "markdown",
+            "content": f"**Created:** {created_at}"
         },
         {
             "tag": "markdown",
@@ -949,6 +956,7 @@ def _scan_once():
                 "last_state": None,
                 "pending_request_ids": set(),
                 "topic_named": False,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             with _lock:
                 _session_threads[sid] = thread
@@ -968,7 +976,7 @@ def _scan_once():
                 prompt = _extract_first_user_prompt(t_data.get("entries", []))
                 if prompt:
                     short = prompt[:50] + ("..." if len(prompt) > 50 else "")
-                    card = _build_session_root_card(s, subject=short)
+                    card = _build_session_root_card(s, subject=short, created_at=thread.get("created_at"))
                     _update_card(thread["root_message_id"], card)
                     thread["topic_named"] = True
                     with _lock:

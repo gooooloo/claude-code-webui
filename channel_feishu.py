@@ -669,14 +669,14 @@ def _extract_first_user_prompt(entries):
                 elif isinstance(c, str):
                     parts.append(c)
             text = " ".join(parts)
+        # Skip local command messages (e.g. /clear) and meta entries
+        if entry.get("isMeta") or "<command-name>" in text or "<local-command-caveat>" in text:
+            continue
         # Strip system tags
         if text:
             text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.DOTALL)
             text = re.sub(r"<[^>]+>", "", text)
             text = re.sub(r"\s+", " ", text).strip()
-        # Skip noise injected by /clear command
-        if text and (text.startswith("Caveat: The messages below") or text.strip() == "clear"):
-            continue
         if text:
             return text
     return None

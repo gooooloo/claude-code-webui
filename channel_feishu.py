@@ -806,30 +806,10 @@ def _handle_message(data):
                 _reply_text(message_id, "Failed to send prompt.")
         return
 
-    # Fallback: find an idle session
-    sessions_data = _server_get("/api/sessions")
-    if not sessions_data:
-        if message_id:
-            _reply_text(message_id, "Server not available.")
-        return
-
-    sessions = sessions_data.get("sessions", [])
-    if not sessions:
-        if message_id:
-            _reply_text(message_id, "No active Claude sessions.")
-        return
-
-    idle_sessions = [s for s in sessions if s.get("state") == "idle"]
-    target = idle_sessions[0] if idle_sessions else sessions[0]
-    sid = target.get("session_id", "")
-
-    if _server_post("/api/send-prompt", {"session_id": sid, "prompt": text}):
-        print(f"[feishu] Prompt sent to session {sid}: {text[:80]}")
-        if message_id:
-            _reply_text(message_id, f"Prompt sent to session {sid}.")
-    else:
-        if message_id:
-            _reply_text(message_id, "Failed to send prompt.")
+    # Message not in any session topic — tell user to reply in a topic
+    print(f"[feishu] Ignored message not in any session topic: {text[:80]}")
+    if message_id:
+        _reply_text(message_id, "Please reply within a session topic to send a prompt.")
 
 
 def _handle_card_action(data):

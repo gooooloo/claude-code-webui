@@ -562,6 +562,80 @@ def _reply_post(parent_message_id, text):
         print(f"[feishu] Failed to reply post: {response.code} {response.msg}")
 
 
+def _adapt_markdown_for_feishu(text):
+    """Adapt standard markdown to Feishu card markdown subset.
+
+    Feishu card markdown does NOT support: headings (#), tables, images.
+    Convert unsupported syntax to supported alternatives.
+    """
+    lines = text.split("\n")
+    result = []
+    in_table = False
+    table_lines = []
+
+    for line in lines:
+        # Convert headings: # Title → **Title**
+        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if heading_match:
+            result.append(f"**{heading_match.group(2)}**")
+            continue
+
+        # Detect markdown tables
+        if re.match(r'^\s*\|.*\|', line):
+            # Skip separator lines like |---|---|
+            if re.match(r'^\s*\|[\s\-:|]+\|', line):
+                continue
+            table_lines.append(line)
+            in_table = True
+            continue
+
+        # Flush accumulated table as code block
+        if in_table:
+            result.append("```")
+            result.extend(table_lines)
+            result.append("```")
+            table_lines = []
+            in_table = False
+
+        result.append(line)
+
+    # Flush trailing table
+    if table_lines:
+        result.append("```")
+        result.extend(table_lines)
+        result.append("```")
+
+    return "\n".join(result)
+
+
+def _reply_markdown_card(parent_message_id, text):
+    """Reply with a card containing a markdown element within a topic."""
+    from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
+
+    adapted = _adapt_markdown_for_feishu(text)
+    card_content = {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "markdown", "content": adapted}
+        ]
+    }
+
+    body = ReplyMessageRequestBody.builder() \
+        .msg_type("interactive") \
+        .content(json.dumps(card_content)) \
+        .reply_in_thread(True) \
+        .build()
+
+    request = ReplyMessageRequest.builder() \
+        .message_id(parent_message_id) \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.message.reply(request)
+    if not response.success():
+        print(f"[feishu] Failed to reply markdown card: {response.code} {response.msg}")
+
+
 def _update_card(message_id, card_content):
     """Update an existing card's content (e.g. mark permission as resolved)."""
     from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
@@ -753,7 +827,10 @@ def _sync_transcript(sid, thread):
         messages = _format_transcript_entry(entry)
         for text, _ in messages:
             if text:
-                _reply_post(root_mid, text)
+                if text.startswith("[Claude] "):
+                    _reply_markdown_card(root_mid, text)
+                else:
+                    _reply_post(root_mid, text)
                 count += 1
 
         thread["sent_index"] += 1

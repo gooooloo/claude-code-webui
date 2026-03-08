@@ -106,6 +106,7 @@ def _load_threads():
             data = json.load(f)
         for sid, t in data.items():
             t["pending_request_ids"] = set(t.get("pending_request_ids", []))
+            t.setdefault("topic_named", False)
         _session_threads = data
         print(f"[feishu] Restored {len(data)} session thread(s) from disk")
     except (json.JSONDecodeError, IOError) as e:
@@ -123,6 +124,7 @@ def _save_threads():
                 "sent_index": t["sent_index"],
                 "last_state": t["last_state"],
                 "pending_request_ids": list(t.get("pending_request_ids", set())),
+                "topic_named": t.get("topic_named", False),
             }
         tmp = _THREADS_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -370,7 +372,7 @@ def _build_permission_resolved_card(request_id, data, decision):
     }
 
 
-def _build_session_root_card(session):
+def _build_session_root_card(session, subject=None):
     """Build the root card for a new session topic."""
     project_dir = session.get("cwd", "")
     session_id = session.get("session_id", "")
@@ -388,6 +390,10 @@ def _build_session_root_card(session):
         {
             "tag": "markdown",
             "content": f"**Directory:** {project_dir}"
+        },
+        {
+            "tag": "markdown",
+            "content": f"**Subject:** {subject or '...'}"
         },
     ]
 
@@ -636,6 +642,33 @@ def _add_to_settings(settings_file, pattern):
             print(f"[feishu] Added to allowlist: {pattern}")
     except (json.JSONDecodeError, IOError) as e:
         print(f"[feishu] Failed to update settings: {e}")
+
+
+def _extract_first_user_prompt(entries):
+    """Extract the first user prompt text from transcript entries."""
+    for entry in entries:
+        if entry.get("type") != "user":
+            continue
+        content = entry.get("message", {}).get("content", "")
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts = []
+            for c in content:
+                if isinstance(c, dict) and c.get("type") == "text":
+                    parts.append(c.get("text", ""))
+                elif isinstance(c, str):
+                    parts.append(c)
+            text = " ".join(parts)
+        # Strip system tags
+        if text:
+            text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", "", text)
+            text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            return text
+    return None
 
 
 # ── Topic management ──
@@ -915,6 +948,7 @@ def _scan_once():
                 "sent_index": 0,
                 "last_state": None,
                 "pending_request_ids": set(),
+                "topic_named": False,
             }
             with _lock:
                 _session_threads[sid] = thread
@@ -926,6 +960,20 @@ def _scan_once():
         if thread["sent_index"] != sent_before:
             with _lock:
                 _save_threads()
+
+        # Update subject field in root card with first user prompt (once)
+        if not thread.get("topic_named") and thread["sent_index"] > 0:
+            t_data = _server_get(f"/api/session/{sid}/transcript?limit=50")
+            if t_data:
+                prompt = _extract_first_user_prompt(t_data.get("entries", []))
+                if prompt:
+                    short = prompt[:50] + ("..." if len(prompt) > 50 else "")
+                    card = _build_session_root_card(s, subject=short)
+                    _update_card(thread["root_message_id"], card)
+                    thread["topic_named"] = True
+                    with _lock:
+                        _save_threads()
+                    print(f"[feishu] Updated subject for session {sid}: {short}")
 
         # Detect state changes
         prev_state = thread["last_state"]

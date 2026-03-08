@@ -122,6 +122,29 @@ HTML_PAGE = """<!DOCTYPE html>
   .sc-project + .sc-collapse-btn { margin-left: auto; }
   .session-card.collapsed .sc-collapse-btn { transform: rotate(-90deg); }
   .session-card.collapsed .sc-body { display: none; }
+  .machine-group-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #a78bfa;
+    padding: 12px 0 4px 0;
+    border-bottom: 1px solid #2a2a4a;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .machine-empty {
+    color: #555;
+    font-size: 13px;
+    padding: 8px 0 12px 0;
+  }
+  .sc-machine {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #2a2a4a;
+    color: #888;
+    margin-left: 6px;
+  }
   .sc-sid-row {
     margin-bottom: 6px;
   }
@@ -656,6 +679,8 @@ HTML_PAGE = """<!DOCTYPE html>
 // ── State ──
 let currentView = 'dashboard';
 let currentSessionId = null;
+let federationLocalName = 'local';
+let federationRemoteNames = [];
 let respondedIds = new Set();
 let imagePaths = [];
 let pollTimer = null;
@@ -775,6 +800,8 @@ async function fetchSessions() {
   try {
     const res = await fetch('/api/sessions');
     const data = await res.json();
+    federationLocalName = data.local_name || 'local';
+    federationRemoteNames = data.remote_names || [];
     renderDashboard(data.sessions || []);
   } catch (e) {
     // connection error, silently retry on next poll
@@ -789,6 +816,7 @@ function buildCardHTML(s) {
   let html = '<div class="sc-top">';
   html += '<span class="state-badge badge-' + state + '" style="cursor:pointer" onclick="event.stopPropagation();openSession(\\'' + esc(s.session_id) + '\\')">' + stateLabel(state) + '</span>';
   html += '<span class="sc-project">' + esc(project) + '</span>';
+  if (s.machine && federationRemoteNames.length > 0) html += '<span class="sc-machine">' + esc(s.machine) + '</span>';
   if (time) html += '<span class="sc-time">' + time + '</span>';
   html += '<button class="sc-collapse-btn" onclick="event.stopPropagation();toggleCollapse(\\'' + esc(s.session_id) + '\\',this)" title="Collapse/Expand">&#9660;</button>';
   html += '</div>';
@@ -824,7 +852,9 @@ function cardHash(s) {
 
 function renderDashboard(sessions) {
   const el = document.getElementById('sessionList');
-  if (sessions.length === 0) {
+  const hasFederation = federationRemoteNames.length > 0;
+
+  if (sessions.length === 0 && !hasFederation) {
     if (lastDashboardHash !== 'empty') {
       el.innerHTML = '<div class="empty"><span class="dot"></span>No active sessions</div>';
       lastDashboardHash = 'empty';
@@ -838,68 +868,109 @@ function renderDashboard(sessions) {
   document.title = needAttention > 0 ? '(' + needAttention + ') Claude Sessions' : 'Claude Sessions';
 
   const collapsedSet = getCollapsedSet();
-  sessions.sort((a, b) => {
-    const ca = collapsedSet.has(a.session_id) ? 1 : 0;
-    const cb = collapsedSet.has(b.session_id) ? 1 : 0;
-    if (ca !== cb) return ca - cb;
-    return getInteractTime(b.session_id) - getInteractTime(a.session_id);
-  });
 
-  const desiredOrder = sessions.map(s => s.session_id);
-  const existingCards = el.querySelectorAll('.session-card[data-sid]');
-  const existingMap = {};
-  existingCards.forEach(c => { existingMap[c.getAttribute('data-sid')] = c; });
+  if (!hasFederation) {
+    // No federation: original flat rendering
+    sessions.sort((a, b) => {
+      const ca = collapsedSet.has(a.session_id) ? 1 : 0;
+      const cb = collapsedSet.has(b.session_id) ? 1 : 0;
+      if (ca !== cb) return ca - cb;
+      return getInteractTime(b.session_id) - getInteractTime(a.session_id);
+    });
 
-  // Remove cards for sessions that no longer exist
-  existingCards.forEach(c => {
-    if (!desiredOrder.includes(c.getAttribute('data-sid'))) c.remove();
-  });
+    const desiredOrder = sessions.map(s => s.session_id);
+    const existingCards = el.querySelectorAll('.session-card[data-sid]');
+    const existingMap = {};
+    existingCards.forEach(c => { existingMap[c.getAttribute('data-sid')] = c; });
 
-  // Update or create cards in order
-  let prevNode = null;
-  sessions.forEach(s => {
-    const sid = s.session_id;
-    const state = s.state || 'busy';
-    const hue = sessionHue(sid);
-    const h = cardHash(s);
-    let card = existingMap[sid];
-    if (card) {
-      // Update class and style
-      const collapsed = isCollapsed(sid) ? ' collapsed' : '';
-      card.className = 'session-card state-' + state + collapsed;
-      card.style.cssText = '--sh:' + hue;
-      // Only update inner content if data changed
-      const prev = card.getAttribute('data-hash');
-      if (prev !== h) {
-        // Skip update if user is typing in this card's prompt input
-        const focused = document.activeElement;
-        if (!(focused && focused.id === 'dashPrompt-' + sid)) {
-          card.innerHTML = buildCardHTML(s);
-          card.setAttribute('data-hash', h);
+    existingCards.forEach(c => {
+      if (!desiredOrder.includes(c.getAttribute('data-sid'))) c.remove();
+    });
+
+    let prevNode = null;
+    sessions.forEach(s => {
+      const sid = s.session_id;
+      const state = s.state || 'busy';
+      const hue = sessionHue(sid);
+      const h = cardHash(s);
+      let card = existingMap[sid];
+      if (card) {
+        const collapsed = isCollapsed(sid) ? ' collapsed' : '';
+        card.className = 'session-card state-' + state + collapsed;
+        card.style.cssText = '--sh:' + hue;
+        const prev = card.getAttribute('data-hash');
+        if (prev !== h) {
+          const focused = document.activeElement;
+          if (!(focused && focused.id === 'dashPrompt-' + sid)) {
+            card.innerHTML = buildCardHTML(s);
+            card.setAttribute('data-hash', h);
+          }
+        }
+      } else {
+        card = document.createElement('div');
+        card.setAttribute('data-sid', sid);
+        card.setAttribute('data-hash', h);
+        const collapsed = isCollapsed(sid) ? ' collapsed' : '';
+        card.className = 'session-card state-' + state + collapsed;
+        card.style.cssText = '--sh:' + hue;
+        card.innerHTML = buildCardHTML(s);
+        el.appendChild(card);
+      }
+      if (prevNode) {
+        if (card.previousElementSibling !== prevNode) {
+          prevNode.after(card);
+        }
+      } else {
+        if (card !== el.firstElementChild) {
+          el.prepend(card);
         }
       }
-    } else {
-      card = document.createElement('div');
-      card.setAttribute('data-sid', sid);
-      card.setAttribute('data-hash', h);
-      const collapsed = isCollapsed(sid) ? ' collapsed' : '';
-      card.className = 'session-card state-' + state + collapsed;
-      card.style.cssText = '--sh:' + hue;
-      card.innerHTML = buildCardHTML(s);
-      el.appendChild(card);
-    }
-    // Ensure correct order
-    if (prevNode) {
-      if (card.previousElementSibling !== prevNode) {
-        prevNode.after(card);
+      prevNode = card;
+    });
+  } else {
+    // Federation: group by machine
+    const groups = {};
+    const ln = federationLocalName;
+    groups[ln] = [];
+    federationRemoteNames.forEach(n => { if (!groups[n]) groups[n] = []; });
+    sessions.forEach(s => {
+      const m = s.machine || ln;
+      if (!groups[m]) groups[m] = [];
+      groups[m].push(s);
+    });
+
+    // Sort within groups
+    Object.values(groups).forEach(arr => {
+      arr.sort((a, b) => {
+        const ca = collapsedSet.has(a.session_id) ? 1 : 0;
+        const cb = collapsedSet.has(b.session_id) ? 1 : 0;
+        if (ca !== cb) return ca - cb;
+        return getInteractTime(b.session_id) - getInteractTime(a.session_id);
+      });
+    });
+
+    // Build grouped HTML
+    const groupOrder = [ln, ...federationRemoteNames.filter(n => n !== ln).sort()];
+    let html = '';
+    groupOrder.forEach(machine => {
+      const arr = groups[machine] || [];
+      html += '<div class="machine-group-header">' + esc(machine) + '</div>';
+      if (arr.length === 0) {
+        html += '<div class="machine-empty">No active sessions</div>';
       }
-    } else {
-      if (card !== el.firstElementChild) {
-        el.prepend(card);
-      }
-    }
-    prevNode = card;
-  });
+      arr.forEach(s => {
+        const sid = s.session_id;
+        const state = s.state || 'busy';
+        const hue = sessionHue(sid);
+        const collapsed = isCollapsed(sid) ? ' collapsed' : '';
+        html += '<div class="session-card state-' + state + collapsed + '" data-sid="' + esc(sid) + '" data-hash="' + cardHash(s) + '" style="--sh:' + hue + '">';
+        html += buildCardHTML(s);
+        html += '</div>';
+      });
+    });
+    el.innerHTML = html;
+  }
+
   lastDashboardHash = sessions.map(s => s.session_id + ':' + cardHash(s)).join('|');
 }
 
@@ -1239,16 +1310,21 @@ function renderTranscript(entries) {
 // ── Actions ──
 
 async function respond(id, decision, btn, message) {
+  let sessionId = currentSessionId || '';
   if (btn) {
     const card = btn.closest('.perm-card, .session-card, .sc-actions');
     if (card) card.querySelectorAll('button').forEach(b => b.disabled = true);
     btn.textContent = '...';
     const sc = btn.closest('.session-card[data-sid]');
-    if (sc) touchSession(sc.getAttribute('data-sid'));
+    if (sc) {
+      touchSession(sc.getAttribute('data-sid'));
+      sessionId = sc.getAttribute('data-sid');
+    }
   }
   try {
     const body = {id, decision};
     if (message) body.message = message;
+    if (sessionId) body.session_id = sessionId;
     await fetch('/api/respond', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1379,10 +1455,12 @@ function toggleSplitPatterns(reqId) {
 
 async function submitPathAllow(reqId, pattern) {
   try {
+    const body = {id: reqId, decision: 'always', allow_pattern: pattern};
+    if (currentSessionId) body.session_id = currentSessionId;
     await fetch('/api/respond', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id: reqId, decision: 'always', allow_pattern: pattern})
+      body: JSON.stringify(body)
     });
     respondedIds.add(reqId);
   } catch (e) {}

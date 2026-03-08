@@ -2,6 +2,7 @@
   "feishu": {
     "enabled": false,
     "app_id": "YOUR_APP_ID",
-    "app_secret": "YOUR_APP_SECRET"
+    "app_secret": "YOUR_APP_SECRET",
+    "chat_id": ""
   }
 }

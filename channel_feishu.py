@@ -2,10 +2,10 @@
 """
 Feishu notification channel for Claude Code WebUI.
 
-Each Claude Code session maps to a Feishu reply thread. A root card is sent
-when a session starts; all subsequent messages (transcript entries, permission
-requests, state changes) are appended as replies. Threads are preserved after
-session end.
+Each Claude Code session maps to a topic in a Feishu topic group. A root card
+is sent to create the topic when a session starts; all subsequent messages
+(transcript entries, permission requests, state changes) are appended as
+replies within that topic. Topics are preserved after session end.
 
 Requires: pip install lark-oapi
 Config:   config.json (see config.example.json)
@@ -79,12 +79,13 @@ def _write_exclusive(filepath, data):
 _client = None          # lark.Client for REST API calls
 _ws_client = None       # lark.ws.Client for WebSocket events
 _target_open_id = None  # Auto-discovered user open_id
+_topic_chat_id = None   # Topic group chat_id
 
 # session_id -> {
-#   "root_message_id": str,     # thread root message ID
+#   "root_message_id": str,     # topic root message ID
 #   "sent_index": int,          # number of transcript entries already sent
 #   "last_state": str,          # last known state (to detect changes)
-#   "pending_request_ids": set, # permission request IDs in this thread
+#   "pending_request_ids": set, # permission request IDs in this topic
 # }
 _session_threads = {}
 
@@ -113,19 +114,81 @@ def load_config():
     return feishu
 
 
-def _save_open_id(open_id):
-    """Persist open_id to config.json under feishu.open_id."""
+def _save_config_field(key, value):
+    """Persist a field to config.json under feishu.<key>."""
     path = _config_path()
     try:
         with open(path) as f:
             cfg = json.load(f)
-        cfg.setdefault("feishu", {})["open_id"] = open_id
+        cfg.setdefault("feishu", {})[key] = value
         with open(path, "w") as f:
             json.dump(cfg, f, indent=2)
             f.write("\n")
-        print(f"[feishu] Saved open_id to config.json")
+        print(f"[feishu] Saved {key} to config.json")
     except (json.JSONDecodeError, IOError) as e:
-        print(f"[feishu] Failed to save open_id: {e}")
+        print(f"[feishu] Failed to save {key}: {e}")
+
+
+# ── Topic group management ──
+
+def _create_topic_group():
+    """Create a new topic group. Returns chat_id or None."""
+    from lark_oapi.api.im.v1 import CreateChatRequest, CreateChatRequestBody
+
+    body = CreateChatRequestBody.builder() \
+        .chat_mode("topic") \
+        .chat_type("group") \
+        .name("Claude Code") \
+        .description("Claude Code sessions — each topic is a session") \
+        .build()
+
+    request = CreateChatRequest.builder() \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.chat.create(request)
+    if response.success():
+        chat_id = response.data.chat_id
+        print(f"[feishu] Created topic group: {chat_id}")
+        return chat_id
+    else:
+        print(f"[feishu] Failed to create topic group: {response.code} {response.msg}")
+        return None
+
+
+def _add_user_to_group(chat_id, open_id):
+    """Add a user to the topic group."""
+    from lark_oapi.api.im.v1 import CreateChatMembersRequest, CreateChatMembersRequestBody
+
+    body = CreateChatMembersRequestBody.builder() \
+        .id_list([open_id]) \
+        .build()
+
+    request = CreateChatMembersRequest.builder() \
+        .chat_id(chat_id) \
+        .member_id_type("open_id") \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.chat_members.create(request)
+    if response.success():
+        print(f"[feishu] Added user {open_id} to group {chat_id}")
+    else:
+        print(f"[feishu] Failed to add user to group: {response.code} {response.msg}")
+
+
+def _ensure_topic_group():
+    """Ensure the topic group exists, creating it if needed. Returns chat_id or None."""
+    global _topic_chat_id
+
+    if _topic_chat_id:
+        return _topic_chat_id
+
+    chat_id = _create_topic_group()
+    if chat_id:
+        _topic_chat_id = chat_id
+        _save_config_field("chat_id", chat_id)
+    return chat_id
 
 
 # ── Card builders ──
@@ -270,7 +333,7 @@ def _build_permission_resolved_card(request_id, data, decision):
 
 
 def _build_session_root_card(session):
-    """Build the root card for a new session thread."""
+    """Build the root card for a new session topic."""
     project_dir = session.get("cwd", "")
     session_id = session.get("session_id", "")
     project_name = os.path.basename(project_dir) if project_dir else "?"
@@ -293,7 +356,7 @@ def _build_session_root_card(session):
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": f"🚀 Claude Code Session"},
+            "title": {"tag": "plain_text", "content": f"🚀 {project_name} — Session {session_id}"},
             "template": "blue"
         },
         "elements": elements
@@ -380,19 +443,21 @@ def _format_transcript_entry(entry):
 
 # ── Feishu API helpers ──
 
-def _send_card(open_id, card_content):
-    """Send an interactive card to a user. Returns message_id or None."""
-    import lark_oapi as lark
+def _send_card_to_group(chat_id, card_content):
+    """Send an interactive card to the topic group. Returns message_id or None.
+
+    In a topic group, sending a message to the group creates a new topic.
+    """
     from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
     body = CreateMessageRequestBody.builder() \
-        .receive_id(open_id) \
+        .receive_id(chat_id) \
         .msg_type("interactive") \
         .content(json.dumps(card_content)) \
         .build()
 
     request = CreateMessageRequest.builder() \
-        .receive_id_type("open_id") \
+        .receive_id_type("chat_id") \
         .request_body(body) \
         .build()
 
@@ -400,18 +465,18 @@ def _send_card(open_id, card_content):
     if response.success():
         return response.data.message_id
     else:
-        print(f"[feishu] Failed to send card: {response.code} {response.msg}")
+        print(f"[feishu] Failed to send card to group: {response.code} {response.msg}")
         return None
 
 
 def _reply_card(parent_message_id, card_content):
-    """Reply with an interactive card to a thread. Returns message_id or None."""
-    import lark_oapi as lark
+    """Reply with an interactive card within a topic. Returns message_id or None."""
     from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
     body = ReplyMessageRequestBody.builder() \
         .msg_type("interactive") \
         .content(json.dumps(card_content)) \
+        .reply_in_thread(True) \
         .build()
 
     request = ReplyMessageRequest.builder() \
@@ -428,11 +493,9 @@ def _reply_card(parent_message_id, card_content):
 
 
 def _reply_post(parent_message_id, text):
-    """Reply with a post (rich text) message to a thread."""
-    import lark_oapi as lark
+    """Reply with a post (rich text) message within a topic."""
     from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
-    # Use post format for richer rendering
     post_content = {
         "zh_cn": {
             "content": [[{"tag": "text", "text": text}]]
@@ -442,6 +505,7 @@ def _reply_post(parent_message_id, text):
     body = ReplyMessageRequestBody.builder() \
         .msg_type("post") \
         .content(json.dumps(post_content)) \
+        .reply_in_thread(True) \
         .build()
 
     request = ReplyMessageRequest.builder() \
@@ -456,7 +520,6 @@ def _reply_post(parent_message_id, text):
 
 def _update_card(message_id, card_content):
     """Update an existing card's content (e.g. mark permission as resolved)."""
-    import lark_oapi as lark
     from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
 
     body = PatchMessageRequestBody.builder() \
@@ -474,13 +537,13 @@ def _update_card(message_id, card_content):
 
 
 def _reply_text(message_id, text):
-    """Reply to a message with text."""
-    import lark_oapi as lark
+    """Reply to a message with text within a topic."""
     from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
     body = ReplyMessageRequestBody.builder() \
         .msg_type("text") \
         .content(json.dumps({"text": text})) \
+        .reply_in_thread(True) \
         .build()
 
     request = ReplyMessageRequest.builder() \
@@ -493,9 +556,8 @@ def _reply_text(message_id, text):
         print(f"[feishu] Failed to reply: {response.code} {response.msg}")
 
 
-def _send_text(open_id, text):
-    """Send a plain text message to a user."""
-    import lark_oapi as lark
+def _send_text_to_user(open_id, text):
+    """Send a plain text message to a user (private chat, for initial connection)."""
     from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
     body = CreateMessageRequestBody.builder() \
@@ -538,19 +600,27 @@ def _add_to_settings(settings_file, pattern):
         print(f"[feishu] Failed to update settings: {e}")
 
 
-# ── Thread management ──
+# ── Topic management ──
 
-def _create_session_thread(session):
-    """Create a root message for a new session thread. Returns message_id or None."""
+def _create_session_topic(session):
+    """Create a new topic in the topic group for a session. Returns message_id or None."""
+    chat_id = _ensure_topic_group()
+    if not chat_id:
+        return None
+
+    # If we just discovered the user but haven't added them to the group yet, do it now
+    if _target_open_id:
+        _add_user_to_group(chat_id, _target_open_id)
+
     card = _build_session_root_card(session)
-    mid = _send_card(_target_open_id, card)
+    mid = _send_card_to_group(chat_id, card)
     if mid:
-        print(f"[feishu] Created thread for session {session.get('session_id', '?')}")
+        print(f"[feishu] Created topic for session {session.get('session_id', '?')}")
     return mid
 
 
 def _sync_transcript(sid, thread):
-    """Fetch transcript and send new entries to the thread. Returns count sent."""
+    """Fetch transcript and send new entries to the topic. Returns count sent."""
     root_mid = thread["root_message_id"]
     sent_index = thread["sent_index"]
 
@@ -612,9 +682,15 @@ def _handle_message(data):
             newly_connected = True
     if newly_connected:
         print(f"[feishu] Connected to user: {open_id}")
-        _save_open_id(open_id)
-        if message_id:
-            _reply_text(message_id, "Connected! You will now receive Claude Code notifications here.")
+        _save_config_field("open_id", open_id)
+
+        # Create topic group and add user
+        chat_id = _ensure_topic_group()
+        if chat_id:
+            _add_user_to_group(chat_id, open_id)
+            _send_text_to_user(open_id, "Connected! A topic group 'Claude Code' has been created. Each session will appear as a separate topic.")
+        else:
+            _send_text_to_user(open_id, "Connected! But failed to create topic group.")
         return
 
     if open_id != _target_open_id:
@@ -634,7 +710,7 @@ def _handle_message(data):
     if not text:
         return
 
-    # Check if message is a reply to a session thread → route to that session
+    # Route by thread_id — messages within a topic carry the root message's thread_id
     root_id = getattr(message, 'root_id', None) or ''
     target_sid = None
 
@@ -646,9 +722,8 @@ def _handle_message(data):
                     break
 
     if target_sid:
-        # Precise routing: send to the session this thread belongs to
         if _server_post("/api/send-prompt", {"session_id": target_sid, "prompt": text}):
-            print(f"[feishu] Prompt sent to session {target_sid} (thread match): {text[:80]}")
+            print(f"[feishu] Prompt sent to session {target_sid} (topic match): {text[:80]}")
             if message_id:
                 _reply_text(message_id, f"Prompt sent to session {target_sid}.")
         else:
@@ -656,7 +731,7 @@ def _handle_message(data):
                 _reply_text(message_id, "Failed to send prompt.")
         return
 
-    # Fallback: find an idle session (most recent idle, or most recent overall)
+    # Fallback: find an idle session
     sessions_data = _server_get("/api/sessions")
     if not sessions_data:
         if message_id:
@@ -767,7 +842,7 @@ def _handle_permission_action(request_id, decision, value):
 # ── Notification loop ──
 
 def _notification_loop():
-    """Background thread: poll /api/sessions and manage Feishu threads."""
+    """Background thread: poll /api/sessions and manage Feishu topics."""
     while True:
         try:
             _scan_once()
@@ -778,9 +853,10 @@ def _notification_loop():
 
 def _scan_once():
     """Single scan iteration — poll sessions, sync transcripts, handle permissions."""
-    global _target_open_id
-
     if _target_open_id is None:
+        return
+
+    if _topic_chat_id is None:
         return
 
     sessions_data = _server_get("/api/sessions")
@@ -790,7 +866,7 @@ def _scan_once():
     sessions = sessions_data.get("sessions", [])
     current_sids = {s["session_id"] for s in sessions}
 
-    # ── Stage 1: Per-session thread management ──
+    # ── Stage 1: Per-session topic management ──
     for s in sessions:
         sid = s["session_id"]
         state = s.get("state", "busy")
@@ -798,9 +874,9 @@ def _scan_once():
         with _lock:
             thread = _session_threads.get(sid)
 
-        # New session → create thread
+        # New session → create topic
         if thread is None:
-            root_mid = _create_session_thread(s)
+            root_mid = _create_session_topic(s)
             if not root_mid:
                 continue
             thread = {
@@ -828,12 +904,12 @@ def _scan_once():
                 msg = f"⏸ {label}"
                 if summary:
                     msg += f"\n{_truncate(summary, 500)}"
-                msg += "\n\nReply in this thread to send a prompt."
+                msg += "\n\nReply in this topic to send a prompt."
                 _reply_post(root_mid, msg)
             elif state == "busy" and prev_state == "idle":
                 _reply_post(root_mid, f"▶ {label}")
 
-    # ── Stage 2: Permission requests (sent into session threads) ──
+    # ── Stage 2: Permission requests (sent into session topics) ──
     with _lock:
         notified_snapshot = set(_notified_requests)
 
@@ -858,11 +934,10 @@ def _scan_once():
         for rid in resolved:
             _request_card_ids.pop(rid, None)
             _notified_requests.discard(rid)
-            # Also clean up from session thread tracking
             for thread in _session_threads.values():
                 thread["pending_request_ids"].discard(rid)
 
-    # New permission requests → send card into session thread
+    # New permission requests → send card into session topic
     for rid, data in pending.items():
         if rid in notified_snapshot:
             continue
@@ -874,13 +949,12 @@ def _scan_once():
             thread = _session_threads.get(req_sid)
 
         if thread:
-            # Send as reply in the session thread
             mid = _reply_card(thread["root_message_id"], card)
             if mid:
                 thread["pending_request_ids"].add(rid)
         else:
-            # No thread found — send as top-level card
-            mid = _send_card(_target_open_id, card)
+            # No topic found — send as top-level message in group (creates new topic)
+            mid = _send_card_to_group(_topic_chat_id, card)
 
         with _lock:
             _notified_requests.add(rid)
@@ -896,7 +970,7 @@ def _scan_once():
             thread = _session_threads.pop(sid, None)
         if thread:
             _reply_post(thread["root_message_id"], "🏁 Session ended.")
-            print(f"[feishu] Session {sid} ended, thread preserved")
+            print(f"[feishu] Session {sid} ended, topic preserved")
 
 
 # ── Public entry point ──
@@ -964,7 +1038,7 @@ def start_feishu_channel():
     Called from server.py main(). Starts the WebSocket client and
     notification loop in background threads. Raises on config/SDK errors.
     """
-    global _client, _ws_client, _target_open_id
+    global _client, _ws_client, _target_open_id, _topic_chat_id
 
     cfg = load_config()
     if cfg is None:
@@ -982,6 +1056,11 @@ def start_feishu_channel():
         _target_open_id = saved_open_id
         print(f"[feishu] Restored open_id from config: {saved_open_id}")
 
+    saved_chat_id = cfg.get("chat_id")
+    if saved_chat_id:
+        _topic_chat_id = saved_chat_id
+        print(f"[feishu] Restored topic group chat_id from config: {saved_chat_id}")
+
     app_id = cfg["app_id"]
     app_secret = cfg["app_secret"]
 
@@ -990,6 +1069,12 @@ def start_feishu_channel():
         .app_secret(app_secret) \
         .log_level(lark.LogLevel.INFO) \
         .build()
+
+    # If we have the user but no topic group yet, create it now
+    if _target_open_id and not _topic_chat_id:
+        chat_id = _ensure_topic_group()
+        if chat_id:
+            _add_user_to_group(chat_id, _target_open_id)
 
     handler = lark.EventDispatcherHandler.builder("", "") \
         .register_p2_im_message_receive_v1(_handle_message) \
@@ -1011,6 +1096,6 @@ def start_feishu_channel():
     notify_thread = threading.Thread(target=_notification_loop, daemon=True)
     notify_thread.start()
 
-    print("[feishu] WebSocket client started")
+    print("[feishu] WebSocket client started (topic group mode)")
     if _target_open_id is None:
         print("[feishu] Send any message to the bot from Feishu to connect")

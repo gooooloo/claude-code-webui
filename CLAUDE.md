@@ -18,18 +18,23 @@ A web UI for Claude Code that replaces default terminal prompts with a browser-b
 ## Architecture
 
 - **server.py** — Python HTTP server (port 19836). Session registry, transcript incremental parser, multi-session dashboard UI, API endpoints. Background threads for auto-allow and zombie session cleanup.
+- **frontend.py** — Extracted HTML/CSS/JS for the dashboard UI. Imported by server.py.
 - **permission-request.py** — `PermissionRequest` hook. Parses tool calls, checks `settings.local.json` for pre-approved glob patterns, falls back to auto-allow if server is offline, otherwise queues a request JSON and polls for response.
 - **session-start.py** — `SessionStart` hook. Discovers transcript path, POSTs to `/api/session/register` with tmux pane, socket, cwd, and source.
 - **session-end.py** — `SessionEnd` hook. POSTs to `/api/session/deregister`, local fallback cleanup of request files.
-- **channel_feishu.py** — Optional Feishu notification channel. Polls `/api/sessions` for state changes, sends permission cards and idle cards. Prompt delivery via `/api/send-prompt`.
-- **install.sh** — Installs symlinks and merges hook config into settings.json. Requires `--project`, `--global`, or `--all`.
-- **uninstall.sh** — Reverses install.sh: removes hook config and symlinks. Same `--project`/`--global`/`--all` interface.
+- **channel_feishu.py** — Optional Feishu notification channel. Polls `/api/sessions` for state changes, sends permission cards and idle cards. Prompt delivery via `/api/send-prompt`. Also manages Feishu topic naming (first user prompt), message routing by thread_id, and session pinning/unpinning.
+- **install.sh** — Installs symlinks and merges hook config into settings.json. Requires `--project`, `--global`, or `--all`. Depends on `jq`.
+- **uninstall.sh** — Reverses install.sh: removes hook config and symlinks. Same `--project`/`--global`/`--all` interface. Depends on `jq`.
+- **dev.sh** — Development helper. Uses `entr` to auto-restart `server.py` when `frontend.py`, `server.py`, or `channel_feishu.py` changes.
 
 ## Running
 
 ```bash
 # Start the server
 ./server.py
+
+# Development mode (auto-restart on file changes, requires entr)
+./dev.sh
 
 # Install hooks (pick a scope)
 /path/to/install.sh --project   # Project-level only
@@ -42,7 +47,7 @@ A web UI for Claude Code that replaces default terminal prompts with a browser-b
 /path/to/uninstall.sh --all
 ```
 
-No build step, no test suite, no linter. Dependencies: Python 3, Bash (install scripts only).
+No build step, no test suite, no linter. Dependencies: Python 3, `jq` (install/uninstall scripts), Bash (install scripts only). Optional: `entr` (for dev.sh auto-restart).
 
 ## Key Conventions
 
@@ -64,6 +69,11 @@ Patterns in `settings.local.json` use `ToolName(pattern)` format with glob match
 - Session state is derived from transcript JSONL (not stored as a state machine)
 - Session-level auto-allow rules are stored in-memory on the server as `{(session_id, tool_name): True}`
 - Zombie sessions (dead PIDs) are cleaned up every 30 seconds
+- **Pane eviction:** when a new session registers on the same tmux pane, previous sessions on that pane are automatically evicted (including their auto-allow rules)
+- **Registration source parameter:** the `source` field (`startup`, `resume`, `clear`, `compact`) controls behavior:
+  - `startup` or new session — creates fresh session state
+  - `resume`/`compact` — updates transcript path and resets parsing offset, preserving auto-allow rules
+  - `clear` — resets transcript offset **and** clears auto-allow rules and stale request files
 
 ### Transcript-Driven State
 The server reads transcript JSONL files incrementally (tracking byte offset). State is derived from the tail:
@@ -112,4 +122,4 @@ Only used for PermissionRequest blocking:
 | POST | `/api/session-end` | Remove session and clear auto-allow (legacy) |
 
 ## Writing Conventions
-- All changes to `PRD.md` must be written in English.
+- All documentation must be written in English.

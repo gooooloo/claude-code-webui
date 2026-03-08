@@ -131,7 +131,19 @@ HTML_PAGE = """<!DOCTYPE html>
     margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
   }
+  .machine-group-header:hover { color: #c4b5fd; }
+  .machine-group-header .mg-arrow {
+    display: inline-block;
+    transition: transform 0.15s;
+    font-size: 10px;
+  }
+  .machine-group-header.mg-collapsed .mg-arrow { transform: rotate(-90deg); }
   .machine-empty {
     color: #555;
     font-size: 13px;
@@ -748,6 +760,28 @@ function collapseAll() {
   lastDashboardHash = '';
 }
 
+function getCollapsedMachines() {
+  try { return new Set(JSON.parse(localStorage.getItem('collapsed_machines') || '[]')); }
+  catch { return new Set(); }
+}
+function isMachineCollapsed(machine) { return getCollapsedMachines().has(machine); }
+function toggleMachineCollapse(machine) {
+  const set = getCollapsedMachines();
+  if (set.has(machine)) set.delete(machine); else set.add(machine);
+  localStorage.setItem('collapsed_machines', JSON.stringify([...set]));
+  // Toggle header class
+  const header = document.querySelector('.machine-group-header[data-machine="' + machine + '"]');
+  if (header) header.classList.toggle('mg-collapsed');
+  // Toggle visibility of session cards and empty message under this machine
+  const el = document.getElementById('sessionList');
+  let sibling = header ? header.nextElementSibling : null;
+  while (sibling && !sibling.classList.contains('machine-group-header')) {
+    sibling.style.display = set.has(machine) ? 'none' : '';
+    sibling = sibling.nextElementSibling;
+  }
+  lastDashboardHash = '';
+}
+
 function renderMarkdown(text) {
   let s = esc(text.trim());
   // Parse tables before other transformations
@@ -963,11 +997,14 @@ function renderDashboard(sessions) {
       let header = el.querySelector('.machine-group-header[data-machine="' + machine + '"]');
       if (!header) {
         header = document.createElement('div');
-        header.className = 'machine-group-header';
         header.setAttribute('data-machine', machine);
-        header.textContent = machine;
       }
+      header.className = 'machine-group-header' + (isMachineCollapsed(machine) ? ' mg-collapsed' : '');
+      header.onclick = function() { toggleMachineCollapse(machine); };
+      const cnt = (groups[machine] || []).length;
+      header.innerHTML = '<span class="mg-arrow">&#9660;</span>' + esc(machine) + ' <span style="font-size:11px;opacity:0.5;text-transform:none;font-weight:400">(' + cnt + ')</span>';
       fragment.appendChild(header);
+      const mgHidden = isMachineCollapsed(machine);
       if (arr.length === 0) {
         let empty = el.querySelector('.machine-empty[data-machine="' + machine + '"]');
         if (!empty) {
@@ -976,6 +1013,7 @@ function renderDashboard(sessions) {
           empty.setAttribute('data-machine', machine);
           empty.textContent = 'No active sessions';
         }
+        empty.style.display = mgHidden ? 'none' : '';
         fragment.appendChild(empty);
       }
       arr.forEach(s => {
@@ -987,7 +1025,7 @@ function renderDashboard(sessions) {
         if (card) {
           const collapsed = isCollapsed(sid) ? ' collapsed' : '';
           card.className = 'session-card state-' + state + collapsed;
-          card.style.cssText = '--sh:' + hue;
+          card.style.cssText = '--sh:' + hue + (mgHidden ? ';display:none' : '');
           if (card.getAttribute('data-hash') !== h) {
             const focused = document.activeElement;
             if (!(focused && focused.id === 'dashPrompt-' + sid)) {
@@ -1001,7 +1039,7 @@ function renderDashboard(sessions) {
           card.setAttribute('data-hash', h);
           const collapsed = isCollapsed(sid) ? ' collapsed' : '';
           card.className = 'session-card state-' + state + collapsed;
-          card.style.cssText = '--sh:' + hue;
+          card.style.cssText = '--sh:' + hue + (mgHidden ? ';display:none' : '');
           card.innerHTML = buildCardHTML(s);
         }
         fragment.appendChild(card);

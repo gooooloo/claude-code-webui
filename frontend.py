@@ -618,6 +618,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <div class="header">
   <button class="back-btn" id="backBtn" onclick="showDashboard()">Back</button>
   <h1 id="pageTitle" ondblclick="window.scrollTo({top:0,behavior:'smooth'})">Claude Sessions</h1>
+  <button class="btn-scroll-bottom" id="collapseAllBtn" onclick="collapseAll()" style="display:flex">Collapse All</button>
   <button class="btn-scroll-bottom" id="scrollBottomBtn" onclick="window.scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})">Bottom</button>
 </div>
 
@@ -706,6 +707,18 @@ function toggleCollapse(sid, btn) {
   const card = btn.closest('.session-card');
   if (card) card.classList.toggle('collapsed');
   touchSession(sid);
+  sortDashboardCards();
+  lastDashboardHash = '';
+}
+function collapseAll() {
+  const cards = document.querySelectorAll('.session-card[data-sid]');
+  const set = getCollapsedSet();
+  cards.forEach(c => {
+    const sid = c.getAttribute('data-sid');
+    set.add(sid);
+    c.classList.add('collapsed');
+  });
+  localStorage.setItem('collapsed_sessions', JSON.stringify([...set]));
   sortDashboardCards();
   lastDashboardHash = '';
 }
@@ -901,6 +914,7 @@ function openSession(sid) {
   document.getElementById('detailView').style.display = 'block';
   document.getElementById('backBtn').style.display = 'flex';
   document.getElementById('scrollBottomBtn').style.display = 'flex';
+  document.getElementById('collapseAllBtn').style.display = 'none';
   document.getElementById('pageTitle').textContent = 'Session ' + sid;
   document.getElementById('transcriptView').innerHTML = '';
   document.getElementById('permCards').innerHTML = '';
@@ -918,6 +932,7 @@ function showDashboard() {
   document.getElementById('detailView').style.display = 'none';
   document.getElementById('backBtn').style.display = 'none';
   document.getElementById('scrollBottomBtn').style.display = 'none';
+  document.getElementById('collapseAllBtn').style.display = 'flex';
   document.getElementById('pageTitle').textContent = 'Claude Sessions';
   document.getElementById('pageTitle').style.color = '#a78bfa';
   stopDetailPolling();

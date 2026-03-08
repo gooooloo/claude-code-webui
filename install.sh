@@ -1,8 +1,8 @@
 #!/bin/bash
-# Installer for Claude Code WebUI hooks
+# Installer for Claude Code WebUI hooks (new architecture)
 #
-# Installs hook configuration and symlinks for the web-approval UI.
-# Requires an explicit scope argument — no default behavior.
+# Installs 3 Python hook scripts (PermissionRequest, SessionStart, SessionEnd).
+# No external dependencies (no jq, curl — hooks are pure Python).
 #
 # Scopes:
 #   --project  Install hooks into <cwd>/.claude/settings.json (project-level only)
@@ -10,7 +10,7 @@
 #   --all      Do both --project and --global
 #
 # Usage: /path/to/install.sh --project|--global|--all
-# Deps:  jq
+# Deps:  jq (for settings.json manipulation only)
 
 set -e
 
@@ -62,44 +62,8 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/permission-request.sh\"",
+          "command": "python3 \"$HOME/.claude/hooks/permission-request.py\"",
           "timeout": 86400
-        }
-      ]
-    }
-  ],
-  "PostToolUse": [
-    {
-      "matcher": ".*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/post-tool-use.sh\"",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
-  "Stop": [
-    {
-      "matcher": ".*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/stop.sh\"",
-          "timeout": 86400
-        }
-      ]
-    }
-  ],
-  "UserPromptSubmit": [
-    {
-      "matcher": ".*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/user-prompt-submit.sh\"",
-          "timeout": 5
         }
       ]
     }
@@ -110,7 +74,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/session-start.sh\"",
+          "command": "python3 \"$HOME/.claude/hooks/session-start.py\"",
           "timeout": 5
         }
       ]
@@ -122,7 +86,7 @@ HOOKS_CONFIG='{
       "hooks": [
         {
           "type": "command",
-          "command": "bash \"$HOME/.claude/hooks/session-end.sh\"",
+          "command": "python3 \"$HOME/.claude/hooks/session-end.py\"",
           "timeout": 5
         }
       ]
@@ -132,7 +96,11 @@ HOOKS_CONFIG='{
 
 install_symlinks() {
   mkdir -p "$HOOKS_DIR"
-  for script in permission-request.sh post-tool-use.sh stop.sh user-prompt-submit.sh session-start.sh session-end.sh; do
+  # Also remove old .sh symlinks if they exist
+  for old_script in permission-request.sh post-tool-use.sh stop.sh user-prompt-submit.sh session-start.sh session-end.sh; do
+    [ -L "$HOOKS_DIR/$old_script" ] && rm -f "$HOOKS_DIR/$old_script"
+  done
+  for script in permission-request.py session-start.py session-end.py; do
     ln -sf "$SHARED_DIR/$script" "$HOOKS_DIR/$script"
   done
   echo "Symlinked hooks to: $HOOKS_DIR"

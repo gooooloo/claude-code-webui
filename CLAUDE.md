@@ -6,25 +6,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A web UI for Claude Code that replaces default terminal prompts with a browser-based interface. Users approve/deny tool executions, submit prompts, upload images, and manage sessions through any browser on the LAN (phones, tablets, desktops).
 
-**Flow:** Claude Code hook → shell script writes JSON request to `/tmp/claude-webui/` → Python HTTP server serves web UI that polls for requests → user interacts → hook reads response JSON → decision returned to Claude Code.
+**Architecture:** Transcript-driven, Tmux-only, minimal hooks.
+
+**Core principles:**
+- **Transcript = single source of truth** — all session state is derived from transcript JSONL, server doesn't maintain a state machine
+- **Tmux-only prompt delivery** — prompts sent via `tmux send-keys`, no file polling for prompts
+- **3 Python hooks** — PermissionRequest, SessionStart, SessionEnd (no bash, no jq/curl dependencies)
+
+**Flow:** Claude Code hook (Python) → writes JSON request to `/tmp/claude-webui/` or POSTs to server → Python HTTP server serves dashboard UI that polls `/api/sessions` → user interacts → hook reads response JSON or server sends via tmux.
 
 ## Architecture
 
-- **server.py** — Python HTTP server (port 19836) with the entire web UI embedded as a single `HTML_PAGE` triple-quoted string. Handles API endpoints (`/api/pending`, `/api/respond`, `/api/submit-prompt`, `/api/session-allow`, `/api/session-reset`, `/api/session-end`, `/api/upload-image`, etc.) and runs a background auto-approve thread for session-level rules.
-- **permission-request.sh** — `PermissionRequest` hook. Parses tool calls, checks `settings.local.json` for pre-approved glob patterns, falls back to auto-allow if server is offline, otherwise queues a request JSON and polls for response.
-- **stop.sh** — `Stop` hook. In non-tmux mode, polls for prompt submission from the web UI. In tmux mode, writes a marker and returns immediately (the UI delivers prompts via `tmux send-keys`).
-- **post-tool-use.sh** — `PostToolUse` hook. Cleans up stale request/response files after tool execution.
-- **user-prompt-submit.sh** — `UserPromptSubmit` hook. Cleans up `.prompt-waiting.json` files when user submits a prompt.
-- **session-start.sh** — `SessionStart` hook. Notifies the server on session start/reset (startup, resume, clear, compact) so it can clear stale requests and session auto-allow rules.
-- **session-end.sh** — `SessionEnd` hook. Aggressively cleans up when a session terminates: notifies the server to clear auto-allow rules and delete all files for this session, with local fallback cleanup if the server is offline.
-- **install.sh** — Installs symlinks and merges hook config into settings.json. Requires `--project`, `--global`, or `--all`.
-- **uninstall.sh** — Reverses install.sh: removes hook config from settings.json and (for global scope) removes symlinks. Same `--project`/`--global`/`--all` interface.
+- **server.py** — Python HTTP server (port 19836). Session registry, transcript incremental parser, multi-session dashboard UI, API endpoints. Background threads for auto-allow and zombie session cleanup.
+- **frontend.py** — Extracted HTML/CSS/JS for the dashboard UI. Imported by server.py.
+- **permission-request.py** — `PermissionRequest` hook. Parses tool calls, checks `settings.local.json` for pre-approved glob patterns, falls back to auto-allow if server is offline, otherwise queues a request JSON and polls for response.
+- **session-start.py** — `SessionStart` hook. Discovers transcript path, POSTs to `/api/session/register` with tmux pane, socket, cwd, and source.
+- **session-end.py** — `SessionEnd` hook. POSTs to `/api/session/deregister`, local fallback cleanup of request files.
+- **channel_feishu.py** — Optional Feishu notification channel. Polls `/api/sessions` for state changes, sends permission cards and idle cards. Prompt delivery via `/api/send-prompt`. Also manages Feishu topic naming (first user prompt), message routing by thread_id, and session pinning/unpinning.
+- **install.sh** — Installs symlinks and merges hook config into settings.json. Requires `--project`, `--global`, or `--all`. Depends on `jq`.
+- **uninstall.sh** — Reverses install.sh: removes hook config and symlinks. Same `--project`/`--global`/`--all` interface. Depends on `jq`.
+- **dev.sh** — Development helper. Uses `entr` to auto-restart `server.py` when `frontend.py`, `server.py`, or `channel_feishu.py` changes.
 
 ## Running
 
 ```bash
 # Start the server
 ./server.py
+
+# Development mode (auto-restart on file changes, requires entr)
+./dev.sh
 
 # Install hooks (pick a scope)
 /path/to/install.sh --project   # Project-level only
@@ -37,7 +47,7 @@ A web UI for Claude Code that replaces default terminal prompts with a browser-b
 /path/to/uninstall.sh --all
 ```
 
-No build step, no test suite, no linter. Dependencies: Python 3, Bash, `jq`, `curl`, `uuidgen`.
+No build step, no test suite, no linter. Dependencies: Python 3, `jq` (install/uninstall scripts), Bash (install scripts only). Optional: `entr` (for dev.sh auto-restart).
 
 ## Key Conventions
 
@@ -55,17 +65,61 @@ Patterns in `settings.local.json` use `ToolName(pattern)` format with glob match
 
 ### Session Management
 - Session ID = PPID (Claude Code's process ID)
+- Sessions are registered via `/api/session/register` (from session-start.py hook)
+- Session state is derived from transcript JSONL (not stored as a state machine)
 - Session-level auto-allow rules are stored in-memory on the server as `{(session_id, tool_name): True}`
-- Hooks detect stale requests by checking process liveness
+- Zombie sessions (dead PIDs) are cleaned up every 30 seconds
+- **Pane eviction:** when a new session registers on the same tmux pane, previous sessions on that pane are automatically evicted (including their auto-allow rules)
+- **Registration source parameter:** the `source` field (`startup`, `resume`, `clear`, `compact`) controls behavior:
+  - `startup` or new session — creates fresh session state
+  - `resume`/`compact` — updates transcript path and resets parsing offset, preserving auto-allow rules
+  - `clear` — resets transcript offset **and** clears auto-allow rules and stale request files
 
-### Tmux Mode
-Detected via `$TMUX` and `$TMUX_PANE` env vars. Prompts are delivered via `tmux load-buffer` + `paste-buffer` + `send-keys` instead of file polling.
+### Transcript-Driven State
+The server reads transcript JSONL files incrementally (tracking byte offset). State is derived from the tail:
+
+| Transcript pattern | Derived state |
+|---|---|
+| Last assistant `stop_reason: "end_turn"`, no pending tool_use | **idle** |
+| Last user message after last assistant | **busy** |
+| Unresolved tool_use in last assistant | **busy** |
+| `.request.json` exists, tool_use has no tool_result | **permission_prompt** |
+| Last tool_use is `AskUserQuestion` | **elicitation** |
+| Last tool_use is `ExitPlanMode` | **plan_review** |
+
+### Tmux Prompt Delivery
+SessionStart hook passes `$TMUX_PANE` and `$TMUX`. Server extracts socket path and sends prompts via:
+```python
+subprocess.run(["tmux", "-S", socket_path, "send-keys", "-t", pane, prompt, "Enter"])
+```
 
 ### Server Offline Fallback
 All hooks auto-approve when the server is unreachable, so Claude Code continues to function normally.
 
-### Header Comments in Hook Scripts
-Each hook script (`*.sh`) has a detailed header comment describing its purpose, flow, inputs, and outputs. When modifying a script's behavior, update its header comment to stay in sync.
+### File Communication
+Only used for PermissionRequest blocking:
+```
+/tmp/claude-webui/
+  ├── *.request.json    (pending permission requests)
+  └── *.response.json   (user decisions)
+```
+
+### API Endpoints
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/` | Dashboard HTML |
+| GET | `/api/sessions` | All sessions with transcript-derived state |
+| GET | `/api/session/<id>/transcript` | Parsed transcript entries |
+| GET | `/api/pending` | Pending permission requests |
+| GET | `/api/image?path=` | Serve uploaded images |
+| POST | `/api/session/register` | Register/update session |
+| POST | `/api/session/deregister` | Deregister session |
+| POST | `/api/respond` | Approve/deny permission |
+| POST | `/api/session-allow` | Session-level auto-allow |
+| POST | `/api/send-prompt` | Send prompt via tmux |
+| POST | `/api/upload-image` | Upload image |
+| POST | `/api/session-reset` | Clear session auto-allow rules (legacy) |
+| POST | `/api/session-end` | Remove session and clear auto-allow (legacy) |
 
 ## Writing Conventions
-- All changes to `PRD.md` must be written in English.
+- All documentation must be written in English.

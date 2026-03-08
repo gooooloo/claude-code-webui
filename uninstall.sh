@@ -1,8 +1,9 @@
 #!/bin/bash
-# Uninstaller for Claude Code WebUI hooks
+# Uninstaller for Claude Code WebUI hooks (new architecture)
 #
 # Reverses what install.sh does: removes hook configuration from settings.json
 # and (for global scope) removes symlinks from ~/.claude/hooks/.
+# Also cleans up old .sh symlinks from the previous architecture.
 #
 # Scopes:
 #   --project  Remove hooks from <cwd>/.claude/settings.json
@@ -83,6 +84,14 @@ remove_hooks_from_settings() {
 
 remove_symlinks() {
   local removed=0
+  # Remove new .py symlinks
+  for script in permission-request.py session-start.py session-end.py; do
+    if [ -L "$HOOKS_DIR/$script" ]; then
+      rm -f "$HOOKS_DIR/$script"
+      removed=$((removed + 1))
+    fi
+  done
+  # Also clean up old .sh symlinks from previous architecture
   for script in permission-request.sh post-tool-use.sh stop.sh user-prompt-submit.sh session-start.sh session-end.sh; do
     if [ -L "$HOOKS_DIR/$script" ]; then
       rm -f "$HOOKS_DIR/$script"

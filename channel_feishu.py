@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Feishu (飞书) notification channel for Claude Code WebUI.
+Feishu notification channel for Claude Code WebUI.
 
-Sends permission requests and prompt-waiting notifications to a Feishu bot,
-allowing users to approve/deny/respond from their phone. Coexists with the
-browser UI — first responder wins.
+Each Claude Code session maps to a topic in a Feishu topic group. A root card
+is sent to create the topic when a session starts; all subsequent messages
+(transcript entries, permission requests, state changes) are appended as
+replies within that topic. Topics are preserved after session end.
 
 Requires: pip install lark-oapi
 Config:   config.json (see config.example.json)
@@ -22,6 +23,13 @@ import urllib.request
 QUEUE_DIR = "/tmp/claude-webui"
 _SERVER_BASE = "http://127.0.0.1:19836"
 _SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+_THREADS_FILE = os.path.join(_DATA_DIR, "feishu_threads.json")
+
+# Max transcript messages to send per session per scan (avoid Feishu rate limit)
+_MAX_MESSAGES_PER_SCAN = 5
+# Delay between messages to avoid rate limiting (seconds)
+_MESSAGE_DELAY = 0.2
 
 
 def _is_safe_id(request_id):
@@ -45,12 +53,19 @@ def _server_post(path, body):
         return False
 
 
-def _write_exclusive(filepath, data):
-    """Atomically create a file only if it doesn't exist (O_CREAT|O_EXCL).
+def _server_get(path):
+    """GET JSON from the local WebUI server. Returns parsed dict or None."""
+    try:
+        req = urllib.request.Request(f"{_SERVER_BASE}{path}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        print(f"[feishu] Server API GET {path} failed: {e}")
+        return None
 
-    Returns True if written, False if file already exists.
-    Raises IOError on other failures.
-    """
+
+def _write_exclusive(filepath, data):
+    """Atomically create a file only if it doesn't exist (O_CREAT|O_EXCL)."""
     try:
         fd = os.open(filepath, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         with os.fdopen(fd, "w") as f:
@@ -66,9 +81,58 @@ def _write_exclusive(filepath, data):
 _client = None          # lark.Client for REST API calls
 _ws_client = None       # lark.ws.Client for WebSocket events
 _target_open_id = None  # Auto-discovered user open_id
-_notified = set()       # Request IDs already pushed to Feishu
-_card_ids = {}          # request_id → feishu message_id (for updating cards)
+_topic_chat_id = None   # Topic group chat_id
+
+# session_id -> {
+#   "root_message_id": str,     # topic root message ID
+#   "sent_index": int,          # number of transcript entries already sent
+#   "last_state": str,          # last known state (to detect changes)
+#   "pending_request_ids": set, # permission request IDs in this topic
+# }
+_session_threads = {}
+
+_notified_requests = set()  # permission request IDs already sent
+_request_card_ids = {}      # request_id -> feishu message_id (for card updates)
 _lock = threading.Lock()
+
+
+def _load_threads():
+    """Load persisted session threads from disk."""
+    global _session_threads
+    if not os.path.exists(_THREADS_FILE):
+        return
+    try:
+        with open(_THREADS_FILE) as f:
+            data = json.load(f)
+        for sid, t in data.items():
+            t["pending_request_ids"] = set(t.get("pending_request_ids", []))
+            t.setdefault("topic_named", False)
+        _session_threads = data
+        print(f"[feishu] Restored {len(data)} session thread(s) from disk")
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"[feishu] Failed to load threads: {e}")
+
+
+def _save_threads():
+    """Persist session threads to disk. Must be called with _lock held."""
+    try:
+        os.makedirs(_DATA_DIR, exist_ok=True)
+        serializable = {}
+        for sid, t in _session_threads.items():
+            serializable[sid] = {
+                "root_message_id": t["root_message_id"],
+                "sent_index": t["sent_index"],
+                "last_state": t["last_state"],
+                "pending_request_ids": list(t.get("pending_request_ids", set())),
+                "topic_named": t.get("topic_named", False),
+                "created_at": t.get("created_at", ""),
+            }
+        tmp = _THREADS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(serializable, f, indent=2)
+        os.replace(tmp, _THREADS_FILE)
+    except (IOError, OSError) as e:
+        print(f"[feishu] Failed to save threads: {e}")
 
 # ── Config ──
 
@@ -77,10 +141,7 @@ def _config_path():
 
 
 def load_config():
-    """Load Feishu config from config.json next to this file.
-
-    Returns the feishu dict (including open_id if previously saved), or None.
-    """
+    """Load Feishu config from config.json next to this file."""
     path = _config_path()
     if not os.path.exists(path):
         return None
@@ -94,34 +155,107 @@ def load_config():
     return feishu
 
 
-def _save_open_id(open_id):
-    """Persist open_id to config.json under feishu.open_id."""
+def _save_config_field(key, value):
+    """Persist a field to config.json under feishu.<key>."""
     path = _config_path()
     try:
         with open(path) as f:
             cfg = json.load(f)
-        cfg.setdefault("feishu", {})["open_id"] = open_id
+        cfg.setdefault("feishu", {})[key] = value
         with open(path, "w") as f:
             json.dump(cfg, f, indent=2)
             f.write("\n")
-        print(f"[feishu] Saved open_id to config.json")
+        print(f"[feishu] Saved {key} to config.json")
     except (json.JSONDecodeError, IOError) as e:
-        print(f"[feishu] Failed to save open_id: {e}")
+        print(f"[feishu] Failed to save {key}: {e}")
+
+
+# ── Topic group management ──
+
+def _create_topic_group():
+    """Create a new topic group. Returns chat_id or None."""
+    from lark_oapi.api.im.v1 import CreateChatRequest, CreateChatRequestBody
+
+    body = CreateChatRequestBody.builder() \
+        .chat_mode("topic") \
+        .chat_type("group") \
+        .name("Claude Code") \
+        .description("Claude Code sessions — each topic is a session") \
+        .build()
+
+    request = CreateChatRequest.builder() \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.chat.create(request)
+    if response.success():
+        chat_id = response.data.chat_id
+        print(f"[feishu] Created topic group: {chat_id}")
+        return chat_id
+    else:
+        print(f"[feishu] Failed to create topic group: {response.code} {response.msg}")
+        return None
+
+
+def _add_user_to_group(chat_id, open_id):
+    """Add a user to the topic group."""
+    from lark_oapi.api.im.v1 import CreateChatMembersRequest, CreateChatMembersRequestBody
+
+    body = CreateChatMembersRequestBody.builder() \
+        .id_list([open_id]) \
+        .build()
+
+    request = CreateChatMembersRequest.builder() \
+        .chat_id(chat_id) \
+        .member_id_type("open_id") \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.chat_members.create(request)
+    if response.success():
+        print(f"[feishu] Added user {open_id} to group {chat_id}")
+    else:
+        print(f"[feishu] Failed to add user to group: {response.code} {response.msg}")
+
+
+def _ensure_topic_group():
+    """Ensure the topic group exists, creating it if needed. Returns chat_id or None."""
+    global _topic_chat_id
+
+    if _topic_chat_id:
+        return _topic_chat_id
+
+    chat_id = _create_topic_group()
+    if chat_id:
+        _topic_chat_id = chat_id
+        _save_config_field("chat_id", chat_id)
+    return chat_id
 
 
 # ── Card builders ──
 
 _TOOL_COLORS = {
-    "Bash": "red",
-    "mcp__acp__Bash": "red",
-    "Write": "orange",
-    "mcp__acp__Write": "orange",
-    "Edit": "orange",
-    "mcp__acp__Edit": "orange",
-    "WebFetch": "blue",
-    "WebSearch": "blue",
-    "ExitPlanMode": "purple",
-    "AskUserQuestion": "green",
+    "Bash": "red", "mcp__acp__Bash": "red",
+    "Write": "orange", "mcp__acp__Write": "orange",
+    "Edit": "orange", "mcp__acp__Edit": "orange",
+    "WebFetch": "blue", "WebSearch": "blue",
+    "ExitPlanMode": "purple", "AskUserQuestion": "green",
+}
+
+_STATE_COLORS = {
+    "idle": "green",
+    "busy": "blue",
+    "permission_prompt": "red",
+    "elicitation": "turquoise",
+    "plan_review": "purple",
+}
+
+_STATE_LABELS = {
+    "idle": "Waiting for input",
+    "busy": "Working...",
+    "permission_prompt": "Needs approval",
+    "elicitation": "Question",
+    "plan_review": "Plan review",
 }
 
 
@@ -148,7 +282,6 @@ def _build_permission_card(request_id, data):
 
     elements = []
 
-    # Project & session info
     if project_dir:
         project_name = os.path.basename(project_dir)
         elements.append({
@@ -156,31 +289,26 @@ def _build_permission_card(request_id, data):
             "content": f"**Project:** {project_name}  |  **Session:** {session_id}"
         })
 
-    # Detail (command, file path, etc.)
     if detail:
         elements.append({
             "tag": "markdown",
             "content": f"```\n{_truncate(detail, 1500)}\n```"
         })
 
-    # Sub-detail (old_string for Edit, prompt for WebFetch, etc.)
     if detail_sub:
         elements.append({
             "tag": "markdown",
             "content": f"_{_truncate(detail_sub, 500)}_"
         })
 
-    # Divider before buttons
     elements.append({"tag": "hr"})
 
-    # Allow pattern display
     if allow_pattern:
         elements.append({
             "tag": "markdown",
             "content": f"Pattern: `{allow_pattern}`"
         })
 
-    # Action buttons (value must be a dict, not a JSON string)
     elements.append({
         "tag": "action",
         "actions": [
@@ -188,31 +316,19 @@ def _build_permission_card(request_id, data):
                 "tag": "button",
                 "text": {"tag": "plain_text", "content": "Allow"},
                 "type": "primary",
-                "value": {
-                    "request_id": request_id,
-                    "decision": "allow",
-                    "type": "permission"
-                }
+                "value": {"request_id": request_id, "decision": "allow", "type": "permission"}
             },
             {
                 "tag": "button",
                 "text": {"tag": "plain_text", "content": "Always Allow"},
                 "type": "default",
-                "value": {
-                    "request_id": request_id,
-                    "decision": "always",
-                    "type": "permission"
-                }
+                "value": {"request_id": request_id, "decision": "always", "type": "permission"}
             },
             {
                 "tag": "button",
                 "text": {"tag": "plain_text", "content": "Deny"},
                 "type": "danger",
-                "value": {
-                    "request_id": request_id,
-                    "decision": "deny",
-                    "type": "permission"
-                }
+                "value": {"request_id": request_id, "decision": "deny", "type": "permission"}
             },
         ]
     })
@@ -227,80 +343,173 @@ def _build_permission_card(request_id, data):
     }
 
 
-def _build_prompt_card(request_id, data):
-    """Build a card for prompt-waiting (Claude finished, waiting for next prompt)."""
-    last_response = data.get("last_response", "")
-    project_dir = data.get("project_dir", "")
-    session_id = data.get("session_id", "")
+def _build_permission_resolved_card(request_id, data, decision):
+    """Build a card showing a resolved permission request (no buttons)."""
+    tool_name = data.get("tool_name", "Unknown")
+    detail = data.get("detail", "")
+
+    allowed = decision in ("allow", "always")
+    label = "✅ Allowed" if allowed else "❌ Denied"
+    template = "green" if allowed else "red"
 
     elements = []
-
-    if project_dir:
-        project_name = os.path.basename(project_dir)
+    if detail:
         elements.append({
             "tag": "markdown",
-            "content": f"**Project:** {project_name}  |  **Session:** {session_id}"
+            "content": f"```\n{_truncate(detail, 500)}\n```"
         })
-
-    if last_response:
-        elements.append({
-            "tag": "markdown",
-            "content": f"```\n{_truncate(last_response)}\n```"
-        })
-    else:
-        elements.append({
-            "tag": "markdown",
-            "content": "Claude has completed the current task."
-        })
-
-    elements.append({"tag": "hr"})
-
     elements.append({
         "tag": "markdown",
-        "content": "**Reply to this bot with your next prompt**, or dismiss:"
-    })
-
-    elements.append({
-        "tag": "action",
-        "actions": [
-            {
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": "Dismiss"},
-                "type": "default",
-                "value": {
-                    "request_id": request_id,
-                    "decision": "dismiss",
-                    "type": "prompt"
-                }
-            }
-        ]
+        "content": f"**{label}**"
     })
 
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": "💬 Claude is waiting for input"},
-            "template": "green"
+            "title": {"tag": "plain_text", "content": f"🔐 {tool_name}"},
+            "template": template
         },
         "elements": elements
     }
 
 
+def _build_session_root_card(session, subject=None, created_at=None):
+    """Build the root card for a new session topic."""
+    project_dir = session.get("cwd", "")
+    session_id = session.get("session_id", "")
+    short_id = session_id[:8] if session_id else "?"
+    project_name = os.path.basename(project_dir) if project_dir else "?"
+    if not created_at:
+        created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    elements = [
+        {
+            "tag": "markdown",
+            "content": f"**Project:** {project_name}"
+        },
+        {
+            "tag": "markdown",
+            "content": f"**Session:** {short_id}"
+        },
+        {
+            "tag": "markdown",
+            "content": f"**Directory:** {project_dir}"
+        },
+        {
+            "tag": "markdown",
+            "content": f"**Created:** {created_at}"
+        },
+        {
+            "tag": "markdown",
+            "content": f"**Subject:** {subject or '...'}"
+        },
+    ]
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"🚀 {project_name} — {short_id}"},
+            "template": "blue"
+        },
+        "elements": elements
+    }
+
+
+# ── Transcript entry formatting ──
+
+def _extract_tool_detail(tool_use):
+    """Extract a human-readable detail string from a tool_use block."""
+    name = tool_use.get("name", "")
+    inp = tool_use.get("input", {})
+    if not isinstance(inp, dict):
+        inp = {}
+
+    if name in ("Bash", "mcp__acp__Bash"):
+        return inp.get("command", "")
+    elif name in ("Write", "Edit", "mcp__acp__Write", "mcp__acp__Edit", "Read"):
+        return inp.get("file_path", "")
+    else:
+        return json.dumps(inp, ensure_ascii=False)[:200]
+
+
+def _format_transcript_entry(entry):
+    """Convert a transcript entry to a list of (label, text) tuples for posting.
+
+    Returns a list because one assistant entry may produce multiple messages
+    (text + tool_use blocks).
+    """
+    etype = entry.get("type", "")
+    msg = entry.get("message", {})
+    content = msg.get("content", "")
+    results = []
+
+    if etype == "user":
+        # Extract user text
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts = []
+            for c in content:
+                if isinstance(c, dict):
+                    if c.get("type") == "text":
+                        parts.append(c.get("text", ""))
+                elif isinstance(c, str):
+                    parts.append(c)
+            text = " ".join(parts)
+
+        # Strip system tags
+        if text:
+            text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", "", text)
+            text = re.sub(r"[^\S\n]+", " ", text)
+            text = text.strip()
+
+        if text:
+            results.append(("[You] " + _truncate(text), None))
+
+    elif etype == "assistant":
+        if isinstance(content, str):
+            if content.strip():
+                results.append(("[Claude] " + _truncate(content), None))
+        elif isinstance(content, list):
+            text_parts = []
+            for c in content:
+                if not isinstance(c, dict):
+                    continue
+                if c.get("type") == "text":
+                    t = c.get("text", "")
+                    if t.strip():
+                        text_parts.append(t)
+                elif c.get("type") == "tool_use":
+                    name = c.get("name", "unknown")
+                    detail = _extract_tool_detail(c)
+                    results.append((f"[Tool: {name}] {_truncate(detail, 500)}", None))
+
+            if text_parts:
+                combined = "\n".join(text_parts)
+                results.insert(0, ("[Claude] " + _truncate(combined), None))
+
+    return results
+
+
 # ── Feishu API helpers ──
 
-def _send_card(open_id, card_content):
-    """Send an interactive card to a user. Returns message_id or None."""
-    import lark_oapi as lark
+def _send_card_to_group(chat_id, card_content):
+    """Send an interactive card to the topic group. Returns message_id or None.
+
+    In a topic group, sending a message to the group creates a new topic.
+    """
     from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
     body = CreateMessageRequestBody.builder() \
-        .receive_id(open_id) \
+        .receive_id(chat_id) \
         .msg_type("interactive") \
         .content(json.dumps(card_content)) \
         .build()
 
     request = CreateMessageRequest.builder() \
-        .receive_id_type("open_id") \
+        .receive_id_type("chat_id") \
         .request_body(body) \
         .build()
 
@@ -308,32 +517,119 @@ def _send_card(open_id, card_content):
     if response.success():
         return response.data.message_id
     else:
-        print(f"[feishu] Failed to send card: {response.code} {response.msg}")
+        print(f"[feishu] Failed to send card to group: {response.code} {response.msg}")
         return None
 
 
-def _delete_message(message_id):
-    """Delete a message by message_id."""
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1 import DeleteMessageRequest
+def _reply_card(parent_message_id, card_content):
+    """Reply with an interactive card within a topic. Returns message_id or None."""
+    from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
-    request = DeleteMessageRequest.builder() \
+    body = ReplyMessageRequestBody.builder() \
+        .msg_type("interactive") \
+        .content(json.dumps(card_content)) \
+        .reply_in_thread(True) \
+        .build()
+
+    request = ReplyMessageRequest.builder() \
+        .message_id(parent_message_id) \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.message.reply(request)
+    if response.success():
+        return response.data.message_id
+    else:
+        print(f"[feishu] Failed to reply card: {response.code} {response.msg}")
+        return None
+
+
+def _reply_post(parent_message_id, text):
+    """Reply with a post (rich text) message within a topic."""
+    from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
+
+    post_content = {
+        "zh_cn": {
+            "content": [[{"tag": "text", "text": text}]]
+        }
+    }
+
+    body = ReplyMessageRequestBody.builder() \
+        .msg_type("post") \
+        .content(json.dumps(post_content)) \
+        .reply_in_thread(True) \
+        .build()
+
+    request = ReplyMessageRequest.builder() \
+        .message_id(parent_message_id) \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.message.reply(request)
+    if not response.success():
+        print(f"[feishu] Failed to reply post: {response.code} {response.msg}")
+
+
+def _update_card(message_id, card_content):
+    """Update an existing card's content (e.g. mark permission as resolved)."""
+    from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+
+    body = PatchMessageRequestBody.builder() \
+        .content(json.dumps(card_content)) \
+        .build()
+
+    request = PatchMessageRequest.builder() \
+        .message_id(message_id) \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.message.patch(request)
+    if not response.success():
+        print(f"[feishu] Failed to update card: {response.code} {response.msg}")
+
+
+def _pin_message(message_id):
+    """Pin a message in a group chat. Used to flag active session topics."""
+    from lark_oapi.api.im.v1 import CreatePinRequest, CreatePinRequestBody
+
+    body = CreatePinRequestBody.builder() \
         .message_id(message_id) \
         .build()
 
-    response = _client.im.v1.message.delete(request)
-    if not response.success():
-        print(f"[feishu] Failed to delete message: {response.code} {response.msg}")
+    request = CreatePinRequest.builder() \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.pin.create(request)
+    if response.success():
+        print(f"[feishu] Pinned message {message_id}")
+    else:
+        print(f"[feishu] Failed to pin message: {response.code} {response.msg}")
+
+
+def _unpin_message(message_id):
+    """Unpin a message in a group chat. Used to unflag ended session topics."""
+    from lark_oapi.api.im.v1 import DeletePinRequest
+
+    request = DeletePinRequest.builder() \
+        .message_id(message_id) \
+        .build()
+
+    response = _client.im.v1.pin.delete(request)
+    if response.success():
+        print(f"[feishu] Unpinned message {message_id}")
+    else:
+        print(f"[feishu] Failed to unpin message: {response.code} {response.msg}")
 
 
 def _reply_text(message_id, text):
-    """Reply to a message with text."""
-    import lark_oapi as lark
+    """Reply to a message with text within a topic."""
     from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
     body = ReplyMessageRequestBody.builder() \
         .msg_type("text") \
         .content(json.dumps({"text": text})) \
+        .reply_in_thread(True) \
         .build()
 
     request = ReplyMessageRequest.builder() \
@@ -346,9 +642,8 @@ def _reply_text(message_id, text):
         print(f"[feishu] Failed to reply: {response.code} {response.msg}")
 
 
-def _send_text(open_id, text):
-    """Send a plain text message to a user."""
-    import lark_oapi as lark
+def _send_text_to_user(open_id, text):
+    """Send a plain text message to a user (private chat, for initial connection)."""
     from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
     body = CreateMessageRequestBody.builder() \
@@ -368,7 +663,7 @@ def _send_text(open_id, text):
 # ── Settings helper (for "Always Allow") ──
 
 def _add_to_settings(settings_file, pattern):
-    """Add an allow pattern to settings.local.json (same logic as server.py)."""
+    """Add an allow pattern to settings.local.json."""
     try:
         if os.path.exists(settings_file):
             with open(settings_file) as f:
@@ -391,6 +686,89 @@ def _add_to_settings(settings_file, pattern):
         print(f"[feishu] Failed to update settings: {e}")
 
 
+def _extract_first_user_prompt(entries):
+    """Extract the first user prompt text from transcript entries."""
+    for entry in entries:
+        if entry.get("type") != "user":
+            continue
+        content = entry.get("message", {}).get("content", "")
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts = []
+            for c in content:
+                if isinstance(c, dict) and c.get("type") == "text":
+                    parts.append(c.get("text", ""))
+                elif isinstance(c, str):
+                    parts.append(c)
+            text = " ".join(parts)
+        # Skip local command messages (e.g. /clear) and meta entries
+        if entry.get("isMeta") or "<command-name>" in text or "<local-command-caveat>" in text:
+            continue
+        # Strip system tags
+        if text:
+            text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", "", text)
+            text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            return text
+    return None
+
+
+# ── Topic management ──
+
+def _create_session_topic(session):
+    """Create a new topic in the topic group for a session. Returns message_id or None."""
+    chat_id = _ensure_topic_group()
+    if not chat_id:
+        return None
+
+    # If we just discovered the user but haven't added them to the group yet, do it now
+    if _target_open_id:
+        _add_user_to_group(chat_id, _target_open_id)
+
+    card = _build_session_root_card(session)
+    mid = _send_card_to_group(chat_id, card)
+    if mid:
+        print(f"[feishu] Created topic for session {session.get('session_id', '?')}")
+        _pin_message(mid)
+    return mid
+
+
+def _sync_transcript(sid, thread):
+    """Fetch transcript and send new entries to the topic. Returns count sent."""
+    root_mid = thread["root_message_id"]
+    sent_index = thread["sent_index"]
+
+    data = _server_get(f"/api/session/{sid}/transcript?limit=500")
+    if not data:
+        return 0
+
+    entries = data.get("entries", [])
+
+    # Handle /clear — if server has fewer entries than we've sent, reset
+    if len(entries) < sent_index:
+        thread["sent_index"] = 0
+        sent_index = 0
+
+    new_entries = entries[sent_index:]
+    if not new_entries:
+        return 0
+
+    count = 0
+    for entry in new_entries:
+        messages = _format_transcript_entry(entry)
+        for text, _ in messages:
+            if text:
+                _reply_post(root_mid, text)
+                count += 1
+
+        thread["sent_index"] += 1
+
+    return count
+
+
 # ── Event handlers ──
 
 def _handle_message(data):
@@ -400,7 +778,6 @@ def _handle_message(data):
     message = data.event.message
     sender = data.event.sender
 
-    # Extract sender open_id
     open_id = sender.sender_id.open_id if sender and sender.sender_id else None
     if not open_id:
         return
@@ -415,12 +792,17 @@ def _handle_message(data):
             newly_connected = True
     if newly_connected:
         print(f"[feishu] Connected to user: {open_id}")
-        _save_open_id(open_id)
-        if message_id:
-            _reply_text(message_id, "Connected! You will now receive Claude Code notifications here.")
+        _save_config_field("open_id", open_id)
+
+        # Create topic group and add user
+        chat_id = _ensure_topic_group()
+        if chat_id:
+            _add_user_to_group(chat_id, open_id)
+            _send_text_to_user(open_id, "Connected! A topic group 'Claude Code' has been created. Each session will appear as a separate topic.")
+        else:
+            _send_text_to_user(open_id, "Connected! But failed to create topic group.")
         return
 
-    # Subsequent messages: treat as prompt submission
     if open_id != _target_open_id:
         return
 
@@ -438,32 +820,31 @@ def _handle_message(data):
     if not text:
         return
 
-    # Find the most recent prompt-waiting file and submit via server API
-    prompt_files = sorted(
-        glob.glob(os.path.join(QUEUE_DIR, "*.prompt-waiting.json")),
-        key=os.path.getmtime,
-        reverse=True
-    )
+    # Route by thread_id — messages within a topic carry the root message's thread_id
+    root_id = getattr(message, 'root_id', None) or ''
+    target_sid = None
 
-    for wf in prompt_files:
-        request_id = os.path.basename(wf).replace(".prompt-waiting.json", "")
-        if not _server_post("/api/submit-prompt", {"id": request_id, "prompt": text}):
-            continue
-        print(f"[feishu] Prompt submitted for {request_id}: {text[:80]}")
-
-        # Delete the Feishu card if we have one
+    if root_id:
         with _lock:
-            mid = _card_ids.get(request_id)
-        if mid:
-            _delete_message(mid)
+            for sid, thread in _session_threads.items():
+                if thread["root_message_id"] == root_id:
+                    target_sid = sid
+                    break
 
-        if message_id:
-            _reply_text(message_id, f"Prompt sent to Claude.")
+    if target_sid:
+        if _server_post("/api/send-prompt", {"session_id": target_sid, "prompt": text}):
+            print(f"[feishu] Prompt sent to session {target_sid} (topic match): {text[:80]}")
+            if message_id:
+                _reply_text(message_id, f"Prompt sent to session {target_sid}.")
+        else:
+            if message_id:
+                _reply_text(message_id, "Failed to send prompt.")
         return
 
-    # No pending prompt-waiting
+    # Message not in any session topic — tell user to reply in a topic
+    print(f"[feishu] Ignored message not in any session topic: {text[:80]}")
     if message_id:
-        _reply_text(message_id, "No pending prompt request. Your message was not delivered to Claude.")
+        _reply_text(message_id, "Please reply within a session topic to send a prompt.")
 
 
 def _handle_card_action(data):
@@ -474,7 +855,6 @@ def _handle_card_action(data):
     if not action:
         return P2CardActionTriggerResponse({"toast": {"type": "info", "content": "No action"}})
 
-    # action.value is a Dict[str, Any]
     value = action.value or {}
     if isinstance(value, str):
         try:
@@ -494,8 +874,6 @@ def _handle_card_action(data):
 
     if action_type == "permission":
         return _handle_permission_action(request_id, decision, value)
-    elif action_type == "prompt":
-        return _handle_prompt_action(request_id, decision)
 
     return P2CardActionTriggerResponse({"toast": {"type": "info", "content": "Unknown action type"}})
 
@@ -510,7 +888,6 @@ def _handle_permission_action(request_id, decision, value):
     if not os.path.exists(request_file):
         return P2CardActionTriggerResponse({"toast": {"type": "warning", "content": "Request expired"}})
 
-    # Read request data before writing response (needed for "always allow")
     req_data = {}
     try:
         with open(request_file) as f:
@@ -518,7 +895,6 @@ def _handle_permission_action(request_id, decision, value):
     except (json.JSONDecodeError, IOError):
         pass
 
-    # Write response atomically (first responder wins)
     resp_decision = "allow" if decision in ("allow", "always") else "deny"
     resp_data = {"decision": resp_decision}
     if decision == "deny":
@@ -531,10 +907,8 @@ def _handle_permission_action(request_id, decision, value):
         print(f"[feishu] Failed to write response: {e}")
         return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Write failed"}})
 
-    # Handle "Always Allow" — write to settings (only after winning the race)
     if decision == "always":
         settings_file = req_data.get("settings_file", "")
-        # Validate settings_file points to a .claude/ directory
         if settings_file and "/.claude/" in settings_file:
             allow_patterns = req_data.get("allow_patterns") or []
             if not allow_patterns:
@@ -544,65 +918,108 @@ def _handle_permission_action(request_id, decision, value):
             for pattern in allow_patterns:
                 _add_to_settings(settings_file, pattern)
 
-    # Read tool name for the resolved card
-    tool_name = ""
-    try:
-        with open(request_file) as f:
-            tool_name = json.load(f).get("tool_name", "")
-    except (json.JSONDecodeError, IOError):
-        pass
-
-    # Update the card to show resolved status
+    # Update the permission card to show resolved state (no buttons)
     with _lock:
-        mid = _card_ids.get(request_id)
+        mid = _request_card_ids.pop(request_id, None)
     if mid:
-        _delete_message(mid)
+        resolved_card = _build_permission_resolved_card(request_id, req_data, decision)
+        _update_card(mid, resolved_card)
 
     label = "Allowed" if decision in ("allow", "always") else "Denied"
     return P2CardActionTriggerResponse({"toast": {"type": "success", "content": label}})
 
 
-def _handle_prompt_action(request_id, decision):
-    """Process a prompt card button click (Dismiss)."""
-    from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
-
-    if not _server_post("/api/dismiss-prompt", {"id": request_id}):
-        return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Dismiss failed"}})
-    print(f"[feishu] Prompt dismissed for {request_id}")
-
-    with _lock:
-        mid = _card_ids.get(request_id)
-    if mid:
-        _delete_message(mid)
-
-    return P2CardActionTriggerResponse({"toast": {"type": "success", "content": "Dismissed"}})
-
-
 # ── Notification loop ──
 
 def _notification_loop():
-    """Background thread: scan for new requests and update Feishu cards."""
+    """Background thread: poll /api/sessions and manage Feishu topics."""
     while True:
         try:
             _scan_once()
         except Exception as e:
             print(f"[feishu] Notification loop error: {e}")
-        time.sleep(0.5)
+        time.sleep(1)
 
 
 def _scan_once():
-    """Single scan iteration — aligned with /api/pending logic from WebUI."""
-    global _target_open_id
-
+    """Single scan iteration — poll sessions, sync transcripts, handle permissions."""
     if _target_open_id is None:
         return
 
+    if _topic_chat_id is None:
+        return
+
+    sessions_data = _server_get("/api/sessions")
+    if not sessions_data:
+        return
+
+    sessions = sessions_data.get("sessions", [])
+    current_sids = {s["session_id"] for s in sessions}
+
+    # ── Stage 1: Per-session topic management ──
+    for s in sessions:
+        sid = s["session_id"]
+        state = s.get("state", "busy")
+
+        with _lock:
+            thread = _session_threads.get(sid)
+
+        # New session → create topic
+        if thread is None:
+            root_mid = _create_session_topic(s)
+            if not root_mid:
+                continue
+            thread = {
+                "root_message_id": root_mid,
+                "sent_index": 0,
+                "last_state": None,
+                "pending_request_ids": set(),
+                "topic_named": False,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            with _lock:
+                _session_threads[sid] = thread
+                _save_threads()
+
+        # Sync transcript entries
+        sent_before = thread["sent_index"]
+        _sync_transcript(sid, thread)
+        if thread["sent_index"] != sent_before:
+            with _lock:
+                _save_threads()
+
+        # Update subject field in root card with first user prompt (once)
+        if not thread.get("topic_named") and thread["sent_index"] > 0:
+            t_data = _server_get(f"/api/session/{sid}/transcript?limit=50")
+            if t_data:
+                prompt = _extract_first_user_prompt(t_data.get("entries", []))
+                if prompt:
+                    short = prompt[:50] + ("..." if len(prompt) > 50 else "")
+                    card = _build_session_root_card(s, subject=short, created_at=thread.get("created_at"))
+                    _update_card(thread["root_message_id"], card)
+                    thread["topic_named"] = True
+                    with _lock:
+                        _save_threads()
+                    print(f"[feishu] Updated subject for session {sid}: {short}")
+
+        # Detect state changes
+        prev_state = thread["last_state"]
+        thread["last_state"] = state
+
+        if prev_state is not None and prev_state != state:
+            root_mid = thread["root_message_id"]
+            label = _STATE_LABELS.get(state, state)
+
+            if state == "idle":
+                _reply_post(root_mid, f"⏸ {label}")
+            elif state == "busy" and prev_state == "idle":
+                _reply_post(root_mid, f"▶ {label}")
+
+    # ── Stage 2: Permission requests (sent into session topics) ──
     with _lock:
-        notified_snapshot = set(_notified)
+        notified_snapshot = set(_notified_requests)
 
-    # Stage 1: Build pending set (same criteria as /api/pending)
-    pending = {}  # request_id → (data, type)
-
+    pending = {}
     for path in glob.glob(os.path.join(QUEUE_DIR, "*.request.json")):
         request_id = os.path.basename(path).replace(".request.json", "")
         resp = path.replace(".request.json", ".response.json")
@@ -613,48 +1030,55 @@ def _scan_once():
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
             continue
-        pending[request_id] = (data, "permission")
-
-    for path in glob.glob(os.path.join(QUEUE_DIR, "*.prompt-waiting.json")):
-        request_id = os.path.basename(path).replace(".prompt-waiting.json", "")
-        resp = path.replace(".prompt-waiting.json", ".prompt-response.json")
-        if os.path.exists(resp):
-            continue
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            continue
-        pending[request_id] = (data, "prompt")
+        pending[request_id] = data
 
     pending_ids = set(pending.keys())
 
-    # Stage 2a: Resolved requests → delete cards
-    # (anything previously notified but no longer pending, regardless of reason)
+    # Resolved requests → update cards to show resolved state
     resolved = notified_snapshot - pending_ids
-    resolved_mids = []
     with _lock:
         for rid in resolved:
-            mid = _card_ids.pop(rid, None)
-            if mid:
-                resolved_mids.append(mid)
-            _notified.discard(rid)
-    for mid in resolved_mids:
-        _delete_message(mid)
+            _request_card_ids.pop(rid, None)
+            _notified_requests.discard(rid)
+            for thread in _session_threads.values():
+                thread["pending_request_ids"].discard(rid)
 
-    # Stage 2b: New requests → send cards
-    for rid, (data, rtype) in pending.items():
+    # New permission requests → send card into session topic
+    for rid, data in pending.items():
         if rid in notified_snapshot:
             continue
-        if rtype == "permission":
-            card = _build_permission_card(rid, data)
-        else:
-            card = _build_prompt_card(rid, data)
-        mid = _send_card(_target_open_id, card)
+
+        card = _build_permission_card(rid, data)
+        req_sid = data.get("session_id", "")
+
         with _lock:
-            _notified.add(rid)
+            thread = _session_threads.get(req_sid)
+
+        if thread:
+            mid = _reply_card(thread["root_message_id"], card)
             if mid:
-                _card_ids[rid] = mid
+                thread["pending_request_ids"].add(rid)
+        else:
+            # No topic found — send as top-level message in group (creates new topic)
+            mid = _send_card_to_group(_topic_chat_id, card)
+
+        with _lock:
+            _notified_requests.add(rid)
+            if mid:
+                _request_card_ids[rid] = mid
+
+    # ── Stage 3: Ended sessions → send farewell, clean up ──
+    with _lock:
+        ended_sids = set(_session_threads.keys()) - current_sids
+
+    for sid in ended_sids:
+        with _lock:
+            thread = _session_threads.pop(sid, None)
+            _save_threads()
+        if thread:
+            _unpin_message(thread["root_message_id"])
+            _reply_post(thread["root_message_id"], "🏁 Session ended.")
+            print(f"[feishu] Session {sid} ended, topic preserved")
 
 
 # ── Public entry point ──
@@ -664,7 +1088,7 @@ def _patch_ws_card_callback(ws_client):
 
     The lark-oapi SDK (v1.5.3) ws.Client._handle_data_frame has:
         elif message_type == MessageType.CARD:
-            return   # ← does nothing, no response sent
+            return   # does nothing, no response sent
     This causes Feishu error 200340 on card button clicks.
 
     We replace _handle_data_frame to route CARD messages through the
@@ -695,7 +1119,6 @@ def _patch_ws_card_callback(ws_client):
         if message_type != MessageType.CARD:
             return await original_handle(frame)
 
-        # Handle CARD callback
         pl = frame.payload
         resp = Response(code=http_module.HTTPStatus.OK)
         try:
@@ -723,9 +1146,7 @@ def start_feishu_channel():
     Called from server.py main(). Starts the WebSocket client and
     notification loop in background threads. Raises on config/SDK errors.
     """
-    global _client, _ws_client
-
-    global _target_open_id
+    global _client, _ws_client, _target_open_id, _topic_chat_id
 
     cfg = load_config()
     if cfg is None:
@@ -738,29 +1159,38 @@ def start_feishu_channel():
         print("[feishu] lark-oapi not installed (pip install lark-oapi), skipping")
         return
 
-    # Restore persisted open_id
+    _load_threads()
+
     saved_open_id = cfg.get("open_id")
     if saved_open_id:
         _target_open_id = saved_open_id
         print(f"[feishu] Restored open_id from config: {saved_open_id}")
 
+    saved_chat_id = cfg.get("chat_id")
+    if saved_chat_id:
+        _topic_chat_id = saved_chat_id
+        print(f"[feishu] Restored topic group chat_id from config: {saved_chat_id}")
+
     app_id = cfg["app_id"]
     app_secret = cfg["app_secret"]
 
-    # HTTP client for sending messages
     _client = lark.Client.builder() \
         .app_id(app_id) \
         .app_secret(app_secret) \
         .log_level(lark.LogLevel.INFO) \
         .build()
 
-    # Event dispatcher
+    # If we have the user but no topic group yet, create it now
+    if _target_open_id and not _topic_chat_id:
+        chat_id = _ensure_topic_group()
+        if chat_id:
+            _add_user_to_group(chat_id, _target_open_id)
+
     handler = lark.EventDispatcherHandler.builder("", "") \
         .register_p2_im_message_receive_v1(_handle_message) \
         .register_p2_card_action_trigger(_handle_card_action) \
         .build()
 
-    # WebSocket client (DEBUG to diagnose card callback)
     _ws_client = lark.ws.Client(
         app_id=app_id,
         app_secret=app_secret,
@@ -768,19 +1198,14 @@ def start_feishu_channel():
         log_level=lark.LogLevel.INFO
     )
 
-    # Patch: SDK ws.Client ignores CARD messages (returns early at line 264).
-    # We monkey-patch _handle_data_frame to route CARD messages through the
-    # event dispatcher's callback processor, so card button clicks work.
     _patch_ws_card_callback(_ws_client)
 
-    # Start WS in background thread
     ws_thread = threading.Thread(target=_ws_client.start, daemon=True)
     ws_thread.start()
 
-    # Start notification loop in background thread
     notify_thread = threading.Thread(target=_notification_loop, daemon=True)
     notify_thread.start()
 
-    print("[feishu] WebSocket client started")
+    print("[feishu] WebSocket client started (topic group mode)")
     if _target_open_id is None:
         print("[feishu] Send any message to the bot from Feishu to connect")

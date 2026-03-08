@@ -2,20 +2,29 @@
 
 A web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that replaces default terminal prompts with a browser-based interface. Approve/deny tool calls, submit prompts, upload images, and manage sessions from your phone, tablet, or any browser on your network.
 
-## How it works
+## Architecture
+
+**Transcript-driven, Tmux-only, 3 Python hooks.**
+
+- All session state is derived from Claude Code's transcript JSONL files — the server doesn't maintain a state machine
+- Prompts are delivered via `tmux send-keys` — no file polling for prompt submission
+- Only 3 hook scripts (all Python, no external dependencies like jq or curl)
+
+### How it works
 
 **Permission approval flow:**
 ```
 Claude Code                          Web browser
       |                                   |
       |-- PermissionRequest hook ------>  |
-      |   (permission-request.sh)             |
+      |   (permission-request.py)         |
       |   writes .request.json to         |
       |   /tmp/claude-webui/              |
       |                                   |
       |          server.py                |
-      |          polls queue dir          |
-      |          serves web UI  --------> |  User sees request
+      |          reads transcript JSONL   |
+      |          derives session state    |
+      |          serves dashboard  ----> |  User sees request
       |                                   |  clicks Allow / Deny
       |          writes .response.json <--|
       |                                   |
@@ -23,75 +32,55 @@ Claude Code                          Web browser
       |   (allow or deny)                 |
 ```
 
-**Prompt submission flow (non-tmux mode):**
+**Prompt submission flow (tmux):**
 ```
-Claude Code                          Web browser
-      |                                   |
-      |-- Stop hook fires                 |
-      |   (stop.sh)                  |
-      |   writes .prompt-waiting.json     |
+Claude Code (in tmux)                Web browser
       |                                   |
       |          server.py                |
-      |          shows prompt input  ---> |  User types new prompt
-      |                                   |  clicks Submit
-      |          writes .prompt-response  |
-      |                                   |
-      |<-- hook reads response            |
-      |   (blocks stop, passes prompt)    |
-```
-
-**Prompt submission flow (tmux mode):**
-```
-Claude Code                          Web browser
-      |                                   |
-      |-- Stop hook fires                 |
-      |   (stop.sh)                       |
-      |   writes .prompt-waiting.json     |
-      |   approves immediately            |
-      |                                   |
-      |          server.py                |
-      |          shows prompt input  ---> |  User types new prompt
-      |                                   |  clicks Submit
+      |          shows session dashboard  |
+      |          with prompt input  ----> |  User types prompt
+      |                                   |  clicks Send
       |                                   |
       |<-- tmux send-keys delivers prompt |
 ```
 
 ### Components
 
-1. **`permission-request.sh`** — `PermissionRequest` hook. Receives the tool call, writes a `.request.json` to `/tmp/claude-webui/`, and polls for a `.response.json`.
-2. **`server.py`** — Python HTTP server (port 19836). Serves a single-page UI that shows pending requests and lets you approve/deny them.
-3. **`post-tool-use.sh`** — `PostToolUse` hook. Cleans up stale request/response files after a tool finishes executing.
-4. **`stop.sh`** — `Stop` hook. When Claude finishes a task, writes a `.prompt-waiting.json` so the Web UI can accept a follow-up prompt.
-5. **`user-prompt-submit.sh`** — `UserPromptSubmit` hook. Cleans up waiting files when a prompt is submitted (from terminal or tmux send-keys).
-6. **`install.sh`** — Registers the hooks in a project's `.claude/settings.json` (or `~/.claude/settings.json` with `--global`).
+1. **`server.py`** — Python HTTP server (port 19836). Session registry, transcript parser, multi-session dashboard.
+2. **`permission-request.py`** — `PermissionRequest` hook. Auto-allow check, writes `.request.json`, polls for `.response.json`.
+3. **`session-start.py`** — `SessionStart` hook. Registers session with server (transcript path, tmux info, cwd).
+4. **`session-end.py`** — `SessionEnd` hook. Deregisters session, cleans up files.
+5. **`channel_feishu.py`** — Optional Feishu (Lark) notification channel.
+6. **`install.sh`** / **`uninstall.sh`** — Hook installation scripts.
 
 ## Features
 
+- **Multi-session dashboard** — see all active Claude Code sessions at a glance
+- **Transcript-derived state** — idle, working, needs approval, question, plan review
 - **Allow / Deny** — approve or reject individual tool calls
-- **Always Allow** — approve and add the pattern to `settings.local.json` so it won't ask again
-- **Allow Path** — for Write/Edit tools, allow all operations under a directory with hierarchical selection
-- **Split Always Allow** — compound Bash commands (pipes and `&&`) are split into individual patterns
-- **Session-level auto-allow** — server-side evaluation with multi-select support
-- **Prompt submission** — submit follow-up prompts from the Web UI when Claude is idle
-- **tmux mode** — in tmux sessions, prompts are delivered via `send-keys` for seamless operation
+- **Always Allow** — approve and add pattern to `settings.local.json`
+- **Allow Path** — for Write/Edit tools, allow all operations under a directory
+- **Split Always Allow** — compound Bash commands split into individual patterns
+- **Session-level auto-allow** — auto-approve specific tools for a session
+- **Prompt submission** — send follow-up prompts via tmux from the dashboard
 - **AskUserQuestion support** — answer Claude's questions with option selection or custom text
-- **Image upload** — attach images in the Web UI prompt area
-- **WebFetch/WebSearch** — permission handling for web access tools
-- **Graceful fallback** — when the server is offline, all hooks auto-approve so Claude Code works normally
-- Auto-cleanup of stale requests (dead processes)
-- Dark-themed, mobile-friendly UI
+- **Plan review** — approve, deny, or provide feedback on plans
+- **Image upload** — attach images in the prompt area
+- **Feishu integration** — optional notification channel for mobile approval
+- **Graceful fallback** — hooks auto-approve when server is offline
+- **Auto-cleanup** — zombie sessions (dead PIDs) cleaned up automatically
+- **Dark-themed, mobile-friendly UI**
 
 ## Requirements
 
 - Python 3
-- `jq`
-- `curl`
-- Bash
-- `uuidgen` (available by default on macOS; install `uuid-runtime` on Debian/Ubuntu)
+- tmux (required for prompt delivery)
+- Bash (for install/uninstall scripts)
+- `jq` (for install/uninstall scripts only)
 
 ## Installation
 
-1. Clone this repo anywhere you like:
+1. Clone this repo:
    ```bash
    git clone https://github.com/gooooloo/claude-code-webui.git
    ```
@@ -104,30 +93,37 @@ Claude Code                          Web browser
 3. Install the hooks:
    ```bash
    # For a single project (run from project directory):
-   /path/to/claude-code-webui/install.sh
+   /path/to/claude-code-webui/install.sh --project
 
    # Or install globally (all projects):
    /path/to/claude-code-webui/install.sh --global
+
+   # Or both:
+   /path/to/claude-code-webui/install.sh --all
    ```
 
-4. **Restart Claude Code** if it's already running — hooks are loaded at startup and won't take effect until the next session.
+4. **Restart Claude Code** if it's already running — hooks are loaded at startup.
 
 5. Open `http://localhost:19836` in your browser (or use your machine's LAN IP from a phone/tablet).
 
-6. Run Claude Code — permission requests will appear in the web UI instead of the terminal.
+6. Run Claude Code **inside tmux** — the dashboard will show your sessions and let you interact.
 
-## Hook behavior matrix
+## Upgrading from the old architecture
 
-Each hook's behavior depends on whether the server is running and whether Claude Code is inside a tmux session:
+If you had the previous version installed (6 bash hooks):
 
-| Hook | Trigger | Non-tmux + Server Online | Non-tmux + Server Offline | tmux + Server Online | tmux + Server Offline | Timeout |
-|------|---------|--------------------------|---------------------------|----------------------|-----------------------|---------|
-| **PermissionRequest** (`permission-request.sh`) | Claude requests tool permission | Write request file → poll for approval → allow/deny | Allow immediately, no file written | Same as non-tmux | Allow immediately, no file written | 24h |
-| **PostToolUse** (`post-tool-use.sh`) | After tool execution | Clean up request/response files | Same (local files only) | Same | Same | 5s |
-| **Stop** (`stop.sh`) | Claude is about to stop | Write waiting file → poll for new prompt → block/approve | Approve immediately, no file written | Write waiting file → approve immediately (Web UI uses tmux send-keys) | Approve immediately, no file written | 24h |
-| **UserPromptSubmit** (`user-prompt-submit.sh`) | User submits a prompt | Clean up waiting files for current session | Same (local files only) | Same | Same | 5s |
+```bash
+# Uninstall old hooks
+/path/to/claude-code-webui/uninstall.sh --all
 
-When the server is offline, all hooks gracefully fall back to non-blocking behavior — permissions are auto-allowed and stop hooks approve immediately — so Claude Code works normally without the web UI.
+# Pull latest
+cd /path/to/claude-code-webui && git pull
+
+# Install new hooks
+/path/to/claude-code-webui/install.sh --all
+```
+
+The new install script automatically cleans up old `.sh` symlinks.
 
 ## Security note
 

@@ -377,6 +377,7 @@ def _build_session_root_card(session, subject=None, created_at=None):
     """Build the root card for a new session topic."""
     project_dir = session.get("cwd", "")
     session_id = session.get("session_id", "")
+    short_id = session_id[:8] if session_id else "?"
     project_name = os.path.basename(project_dir) if project_dir else "?"
     if not created_at:
         created_at = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -388,7 +389,7 @@ def _build_session_root_card(session, subject=None, created_at=None):
         },
         {
             "tag": "markdown",
-            "content": f"**Session:** {session_id}"
+            "content": f"**Session:** {short_id}"
         },
         {
             "tag": "markdown",
@@ -407,7 +408,7 @@ def _build_session_root_card(session, subject=None, created_at=None):
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": f"🚀 {project_name} — Session {session_id}"},
+            "title": {"tag": "plain_text", "content": f"🚀 {project_name} — {short_id}"},
             "template": "blue"
         },
         "elements": elements

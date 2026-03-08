@@ -588,6 +588,40 @@ def _update_card(message_id, card_content):
         print(f"[feishu] Failed to update card: {response.code} {response.msg}")
 
 
+def _pin_message(message_id):
+    """Pin a message in a group chat. Used to flag active session topics."""
+    from lark_oapi.api.im.v1 import CreatePinRequest, CreatePinRequestBody
+
+    body = CreatePinRequestBody.builder() \
+        .message_id(message_id) \
+        .build()
+
+    request = CreatePinRequest.builder() \
+        .request_body(body) \
+        .build()
+
+    response = _client.im.v1.pin.create(request)
+    if response.success():
+        print(f"[feishu] Pinned message {message_id}")
+    else:
+        print(f"[feishu] Failed to pin message: {response.code} {response.msg}")
+
+
+def _unpin_message(message_id):
+    """Unpin a message in a group chat. Used to unflag ended session topics."""
+    from lark_oapi.api.im.v1 import DeletePinRequest
+
+    request = DeletePinRequest.builder() \
+        .message_id(message_id) \
+        .build()
+
+    response = _client.im.v1.pin.delete(request)
+    if response.success():
+        print(f"[feishu] Unpinned message {message_id}")
+    else:
+        print(f"[feishu] Failed to unpin message: {response.code} {response.msg}")
+
+
 def _reply_text(message_id, text):
     """Reply to a message with text within a topic."""
     from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
@@ -698,6 +732,7 @@ def _create_session_topic(session):
     mid = _send_card_to_group(chat_id, card)
     if mid:
         print(f"[feishu] Created topic for session {session.get('session_id', '?')}")
+        _pin_message(mid)
     return mid
 
 
@@ -1041,6 +1076,7 @@ def _scan_once():
             thread = _session_threads.pop(sid, None)
             _save_threads()
         if thread:
+            _unpin_message(thread["root_message_id"])
             _reply_post(thread["root_message_id"], "🏁 Session ended.")
             print(f"[feishu] Session {sid} ended, topic preserved")
 

@@ -40,13 +40,13 @@ python3 server.py          # localhost only (default)
 python3 server.py --lan    # bind 0.0.0.0 for LAN access
 
 # MultiView hub mode (central machine)
-python3 server.py --lan --name hub
+python3 server.py --name hub
 
 # MultiView remote (register with hub, manual tunnel ID)
-python3 server.py --lan --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
+python3 server.py --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
 
 # MultiView remote (auto-detect tunnel ID)
-python3 server.py --lan --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
+python3 server.py --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
 
 # Development mode (auto-restart on file changes, requires entr, Linux/macOS only)
 ./dev.sh

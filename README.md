@@ -172,17 +172,17 @@ The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<ran
 
 1. **Pick one machine as the hub** (the one you'll open in your browser):
    ```bash
-   python3 server.py --lan --name hub
+   python3 server.py --name hub
    devtunnel host --tunnel-id hub-machine
    ```
 
 2. **Start remote servers** with `--hub-tunnel-id` pointing to the hub's random ID:
    ```bash
    # With explicit tunnel ID (find it via `devtunnel list`)
-   python3 server.py --lan --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
+   python3 server.py --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
 
    # Or auto-detect tunnel ID
-   python3 server.py --lan --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
+   python3 server.py --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
    ```
 
 3. Open `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — all registered machines appear automatically.

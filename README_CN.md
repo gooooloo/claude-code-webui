@@ -172,17 +172,17 @@ devtunnel host --tunnel-id my-machine
 
 1. **选一台机器作为 hub**（你在浏览器上打开的那台）：
    ```bash
-   python3 server.py --lan --name hub
+   python3 server.py --name hub
    devtunnel host --tunnel-id hub-machine
    ```
 
 2. **启动远程服务器**，用 `--hub-tunnel-id` 指向 hub 的 random ID：
    ```bash
    # 手动指定 tunnel ID（通过 `devtunnel list` 查看）
-   python3 server.py --lan --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
+   python3 server.py --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
 
    # 或自动检测 tunnel ID
-   python3 server.py --lan --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
+   python3 server.py --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
    ```
 
 3. 打开 `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — 所有注册的机器会自动出现。

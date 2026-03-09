@@ -1418,7 +1418,14 @@ def main():
     args = parser.parse_args()
 
     global local_name, remote_servers
-    local_name = args.name
+    # Default --name to tunnel ID if not explicitly set
+    tunnel_id = args.tunnel_id
+    if not tunnel_id and args.detect_tunnel:
+        tunnel_id = detect_devtunnel_id()
+    if args.name == "local" and tunnel_id:
+        local_name = tunnel_id
+    else:
+        local_name = args.name
 
     # Load remotes config
     remotes_path = args.remotes
@@ -1461,15 +1468,10 @@ def main():
     # MultiView hub registration heartbeat
     if args.hub_tunnel_id:
         hub_url = f"https://{args.hub_tunnel_id}-{PORT}.asse.devtunnels.ms"
-        # Determine this machine's public URL
-        tunnel_id = args.tunnel_id
-        if not tunnel_id and args.detect_tunnel:
-            tunnel_id = detect_devtunnel_id()
         if tunnel_id:
             self_url = f"https://{tunnel_id}-{PORT}.asse.devtunnels.ms"
         else:
-            print("[!] MultiView: --hub requires --tunnel-id or --detect-tunnel")
-            sys.exit(1)
+            print("[!] MultiView: --hub-tunnel-id requires --tunnel-id or --detect-tunnel")
             sys.exit(1)
         def hub_heartbeat():
             while True:

@@ -130,30 +130,62 @@ The new install script automatically cleans up old `.sh` symlinks.
 
 MultiView lets you monitor the same WebUI service running on multiple machines from a single page. Remote servers self-register with a central hub; the MultiView page auto-discovers all machines and provides quick-open links.
 
-### Setup
+### DevTunnels setup (one-time per machine)
 
-1. **Create a persistent DevTunnel on each machine** (one-time):
-   ```bash
-   devtunnel create --id my-machine
-   devtunnel port create --tunnel-id my-machine --port-number 19836
-   ```
+[Microsoft DevTunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/overview) gives each machine a public HTTPS URL without port forwarding. Install the CLI:
 
-2. **Start the hub** (the central machine you'll access):
+```bash
+# Windows (winget)
+winget install Microsoft.devtunnel
+
+# Linux
+curl -sL https://aka.ms/DevTunnelCliInstall | bash
+
+# macOS
+brew install --cask devtunnel
+```
+
+Login and create a **named tunnel** (persistent — survives reboots, only `devtunnel delete` removes it):
+
+```bash
+devtunnel login
+devtunnel create --id my-machine        # named ID for local reference
+devtunnel port create --tunnel-id my-machine --port-number 19836
+```
+
+Each time you need the tunnel active, just host it:
+
+```bash
+devtunnel host --tunnel-id my-machine
+```
+
+The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<random-id>` is assigned once at creation time and stays the same as long as you don't delete the tunnel. You can find it via `devtunnel list`.
+
+> **Tip:** You can expose multiple ports on the same tunnel:
+> ```bash
+> devtunnel port create --tunnel-id my-machine --port-number 8080
+> devtunnel port create --tunnel-id my-machine --port-number 3000
+> ```
+> Each port gets its own URL: `https://<random-id>-8080.asse.devtunnels.ms`, etc.
+
+### MultiView setup
+
+1. **Pick one machine as the hub** (the one you'll open in your browser):
    ```bash
    python3 server.py --lan --name hub
    devtunnel host --tunnel-id hub-machine
    ```
 
-3. **Start remote servers** with `--hub-tunnel-id` pointing to the hub:
+2. **Start remote servers** with `--hub-tunnel-id` pointing to the hub's random ID:
    ```bash
-   # With explicit tunnel ID
+   # With explicit tunnel ID (find it via `devtunnel list`)
    python3 server.py --lan --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
 
    # Or auto-detect tunnel ID
    python3 server.py --lan --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
    ```
 
-4. Open `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — all registered machines appear automatically.
+3. Open `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — all registered machines appear automatically.
 
 ### CLI arguments
 

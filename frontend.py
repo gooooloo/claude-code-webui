@@ -1866,15 +1866,9 @@ function addRemoteRow(name, url) {
   const row = document.createElement('div');
   row.className = 'remote-row';
   row.innerHTML = '<input type="text" placeholder="Name" value="' + esc(name || '') + '">'
-    + '<input type="text" placeholder="subdomain or full URL" value="' + esc(url || '') + '">'
+    + '<input type="text" placeholder="http://host:19836" value="' + esc(url || '') + '">'
     + '<button class="btn-rm" onclick="this.parentElement.remove()">X</button>';
   c.appendChild(row);
-}
-
-function expandUrl(raw) {
-  if (!raw) return raw;
-  if (raw.includes('://')) return raw;
-  return 'https://' + raw + '-19836.asse.devtunnels.ms';
 }
 
 function saveSettings() {
@@ -1883,7 +1877,7 @@ function saveSettings() {
   rows.forEach(row => {
     const inputs = row.querySelectorAll('input');
     const name = inputs[0].value.trim();
-    const url = expandUrl(inputs[1].value.trim());
+    const url = inputs[1].value.trim();
     if (name && url) remotes.push({name, url});
   });
   localStorage.setItem(LS_KEY_REMOTES, JSON.stringify(remotes));

@@ -197,7 +197,9 @@ def check_smart_auto_approve(data):
     return False
 
 # ── Federation ──
+remote_servers = []          # [{"name": str, "url": str}]
 local_name = "local"
+session_machine_map = {}     # {session_id: remote_url or None(local)}
 
 
 def proxy_to_remote(remote_url, path, method="GET", body=None, headers=None):
@@ -212,12 +214,12 @@ def proxy_to_remote(remote_url, path, method="GET", body=None, headers=None):
     return resp.status, resp.read(), resp.headers.get("Content-Type", "application/json")
 
 
-def fetch_remote_sessions(remotes):
-    """Fetch sessions from given remote servers. Returns list of (remote_config, sessions_or_None)."""
+def fetch_remote_sessions():
+    """Fetch sessions from all remote servers. Returns list of (remote_config, sessions_or_None)."""
     results = []
-    for remote in remotes:
+    for remote in remote_servers:
         try:
-            url = remote["url"].rstrip("/") + "/api/sessions?local_only=1"
+            url = remote["url"].rstrip("/") + "/api/sessions"
             req = urllib.request.Request(url)
             resp = urllib.request.urlopen(req, timeout=3)
             data = json.loads(resp.read())
@@ -228,14 +230,16 @@ def fetch_remote_sessions(remotes):
     return results
 
 
-def _resolve_remote(remotes, session_id):
-    """From a federated session_id like 'machine:123', find (remote_url, original_sid). Returns (None, session_id) if local."""
+def _get_remote_url_for_session(session_id):
+    """Return remote URL if session is remote, None if local."""
+    return session_machine_map.get(session_id)
+
+
+def _get_original_session_id(session_id):
+    """Strip the machine prefix to get the original remote session ID."""
     if ":" in session_id:
-        machine, original_sid = session_id.split(":", 1)
-        for r in remotes:
-            if r["name"] == machine:
-                return r["url"], original_sid
-    return None, session_id
+        return session_id.split(":", 1)[1]
+    return session_id
 
 
 # ── Transcript parsing ──
@@ -715,23 +719,27 @@ class WebUIHandler(BaseHTTPRequestHandler):
                     result.append(entry)
 
             # Federation: tag local sessions and merge remote sessions
-            remotes = self._get_remotes()
             for entry in result:
                 entry["machine"] = local_name
+                session_machine_map[entry["session_id"]] = None
 
             qs = parse_qs(parsed.query)
             local_only = qs.get("local_only", [""])[0] == "1"
 
-            if remotes and not local_only:
-                for remote, remote_sessions in fetch_remote_sessions(remotes):
+            if remote_servers and not local_only:
+                remote_results = fetch_remote_sessions()
+                for remote, remote_sessions in remote_results:
                     if remote_sessions is None:
                         continue
                     for rs in remote_sessions:
                         rs["machine"] = remote["name"]
-                        rs["session_id"] = remote["name"] + ":" + str(rs["session_id"])
+                        original_sid = rs["session_id"]
+                        rs["session_id"] = remote["name"] + ":" + str(original_sid)
+                        rs["_remote_session_id"] = original_sid
+                        session_machine_map[rs["session_id"]] = remote["url"]
                         result.append(rs)
 
-            remote_names = [r["name"] for r in remotes]
+            remote_names = [r["name"] for r in remote_servers]
             self._respond_json({"sessions": result, "local_name": local_name, "remote_names": remote_names})
 
         elif path.startswith("/api/session/") and path.endswith("/transcript"):
@@ -740,9 +748,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
             sid = parts[3] if len(parts) > 3 else ""
 
             # Federation proxy
-            remote_url, original_sid = _resolve_remote(self._get_remotes(), sid)
+            remote_url = _get_remote_url_for_session(sid)
             if remote_url:
                 try:
+                    original_sid = _get_original_session_id(sid)
                     proxy_path = f"/api/session/{original_sid}/transcript"
                     if parsed.query:
                         proxy_path += "?" + parsed.query
@@ -795,19 +804,20 @@ class WebUIHandler(BaseHTTPRequestHandler):
                     continue
 
             # Federation: aggregate remote pending requests
-            for remote in self._get_remotes():
-                try:
-                    url = remote["url"].rstrip("/") + "/api/pending"
-                    req = urllib.request.Request(url)
-                    resp = urllib.request.urlopen(req, timeout=3)
-                    data = json.loads(resp.read())
-                    for r in data.get("requests", []):
-                        r["machine"] = remote["name"]
-                        if "session_id" in r:
-                            r["session_id"] = remote["name"] + ":" + str(r["session_id"])
-                        requests.append(r)
-                except Exception:
-                    pass
+            if remote_servers:
+                for remote in remote_servers:
+                    try:
+                        url = remote["url"].rstrip("/") + "/api/pending"
+                        req = urllib.request.Request(url)
+                        resp = urllib.request.urlopen(req, timeout=3)
+                        data = json.loads(resp.read())
+                        for r in data.get("requests", []):
+                            r["machine"] = remote["name"]
+                            if "session_id" in r:
+                                r["session_id"] = remote["name"] + ":" + str(r["session_id"])
+                            requests.append(r)
+                    except Exception:
+                        pass
 
             self._respond_json({"requests": requests})
 
@@ -816,7 +826,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
             # Federation: route to remote if machine param specified
             machine = params.get("machine", [""])[0]
             if machine and machine != local_name:
-                remote_url = next((r["url"] for r in self._get_remotes() if r["name"] == machine), None)
+                remote_url = next((r["url"] for r in remote_servers if r["name"] == machine), None)
                 if remote_url:
                     try:
                         proxy_path = "/api/image?" + parsed.query
@@ -981,11 +991,11 @@ class WebUIHandler(BaseHTTPRequestHandler):
 
             # Federation: check if this should be proxied
             sid = str(body.get("session_id", ""))
-            remote_url, original_sid = _resolve_remote(self._get_remotes(), sid)
+            remote_url = _get_remote_url_for_session(sid) if sid else None
             if remote_url:
                 try:
                     proxy_body = dict(body)
-                    proxy_body["session_id"] = original_sid
+                    proxy_body.pop("session_id", None)  # remote doesn't need federated sid
                     status, resp_body, ct = proxy_to_remote(
                         remote_url, "/api/respond", method="POST",
                         body=json.dumps(proxy_body).encode()
@@ -1036,10 +1046,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
             request_id = body.get("id", "")
 
             # Federation proxy
-            remote_url, original_sid = _resolve_remote(self._get_remotes(), sid)
+            remote_url = _get_remote_url_for_session(sid)
             if remote_url:
                 try:
-                    proxy_body = {"session_id": original_sid, "tool_name": tool_name, "id": request_id}
+                    proxy_body = {"session_id": _get_original_session_id(sid), "tool_name": tool_name, "id": request_id}
                     status, resp_body, ct = proxy_to_remote(
                         remote_url, "/api/session-allow", method="POST",
                         body=json.dumps(proxy_body).encode()
@@ -1072,10 +1082,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 return
 
             # Federation proxy
-            remote_url, original_sid = _resolve_remote(self._get_remotes(), sid)
+            remote_url = _get_remote_url_for_session(sid)
             if remote_url:
                 try:
-                    proxy_body = {"session_id": original_sid, "prompt": prompt}
+                    proxy_body = {"session_id": _get_original_session_id(sid), "prompt": prompt}
                     status, resp_body, ct = proxy_to_remote(
                         remote_url, "/api/send-prompt", method="POST",
                         body=json.dumps(proxy_body).encode()
@@ -1154,17 +1164,6 @@ class WebUIHandler(BaseHTTPRequestHandler):
 
         else:
             self.send_error(404)
-
-    def _get_remotes(self):
-        """Parse remotes from X-Remotes header. Returns list of {"name": str, "url": str}."""
-        raw = self.headers.get("X-Remotes", "")
-        if not raw:
-            return []
-        try:
-            remotes = json.loads(raw)
-            return [r for r in remotes if isinstance(r, dict) and r.get("name") and r.get("url")]
-        except (json.JSONDecodeError, TypeError):
-            return []
 
     def _read_json(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -1329,12 +1328,27 @@ def scan_existing_sessions():
 
 def main():
     parser = argparse.ArgumentParser(description="Claude Code WebUI Server")
+    parser.add_argument("--remotes", help="Path to remotes.json (default: remotes.json in script dir)")
     parser.add_argument("--name", default="local", help="Name for this machine in dashboard (default: local)")
     parser.add_argument("--lan", action="store_true", help="Listen on 0.0.0.0 instead of 127.0.0.1 (allow LAN access)")
     args = parser.parse_args()
 
-    global local_name
+    global local_name, remote_servers
     local_name = args.name
+
+    # Load remotes config
+    remotes_path = args.remotes
+    if not remotes_path:
+        remotes_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "remotes.json")
+    if os.path.isfile(remotes_path):
+        try:
+            with open(remotes_path) as f:
+                remote_servers = json.load(f)
+            print(f"[*] Federation: {len(remote_servers)} remote(s) loaded from {remotes_path}")
+            for r in remote_servers:
+                print(f"    - {r['name']}: {r['url']}")
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"[!] Failed to load remotes: {e}")
 
     os.makedirs(QUEUE_DIR, exist_ok=True)
 

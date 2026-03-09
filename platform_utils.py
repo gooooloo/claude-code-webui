@@ -7,6 +7,7 @@ On Windows, uses ctypes Win32 API calls (no third-party dependencies).
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -302,3 +303,61 @@ def _get_process_name_windows(pid):
         k32.CloseHandle(snap)
 
     return ""
+
+
+# ── Prompt delivery ──
+
+def send_prompt(session_info, prompt_text):
+    """Send a prompt to a session, dispatching to the appropriate platform method."""
+    if IS_WINDOWS:
+        console_pid = session_info.get("console_pid")
+        if console_pid:
+            return _send_prompt_windows(console_pid, prompt_text)
+        return False
+    return _send_prompt_tmux(session_info, prompt_text)
+
+
+def _send_prompt_windows(console_pid, text):
+    """Send a prompt to a Windows console via win_send_keys.py subprocess."""
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "win_send_keys.py"),
+             str(console_pid), text],
+            capture_output=True, timeout=10
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _send_prompt_tmux(session_info, prompt):
+    """Send a prompt to a tmux pane."""
+    tmux_socket = session_info.get("tmux_socket", "")
+    pane = session_info.get("tmux_pane", "")
+    if not pane:
+        return False
+
+    cmd_base = ["tmux"]
+    if tmux_socket:
+        socket_path = tmux_socket.split(",")[0]
+        cmd_base = ["tmux", "-S", socket_path]
+
+    try:
+        # Load prompt into buffer via stdin
+        subprocess.run(
+            cmd_base + ["load-buffer", "-"],
+            input=prompt.encode(), capture_output=True, timeout=5
+        )
+        # Paste buffer into target pane
+        subprocess.run(
+            cmd_base + ["paste-buffer", "-t", pane, "-d"],
+            capture_output=True, timeout=5
+        )
+        # Send Enter
+        subprocess.run(
+            cmd_base + ["send-keys", "-t", pane, "Enter"],
+            capture_output=True, timeout=5
+        )
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False

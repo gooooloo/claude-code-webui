@@ -26,7 +26,7 @@ import uuid
 import cgi
 
 from frontend import HTML_PAGE, MULTIVIEW_PAGE
-from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path
+from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path, send_prompt
 
 try:
     from channel_feishu import start_feishu_channel
@@ -451,64 +451,6 @@ def zombie_cleanup_loop():
         if dead:
             print(f"[~] Cleaned up {len(dead)} zombie session(s): {dead}")
 
-
-# ── Prompt delivery ──
-
-def win_send_prompt(console_pid, text):
-    """Send a prompt to a Windows console via win_send_keys.py."""
-    try:
-        result = subprocess.run(
-            [sys.executable, os.path.join(os.path.dirname(__file__), "win_send_keys.py"),
-             str(console_pid), text],
-            capture_output=True, timeout=10
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def tmux_send_prompt(session, prompt):
-    """Send a prompt to a tmux pane."""
-    tmux_socket = session.get("tmux_socket", "")
-    pane = session.get("tmux_pane", "")
-    if not pane:
-        return False
-
-    cmd_base = ["tmux"]
-    if tmux_socket:
-        socket_path = tmux_socket.split(",")[0]
-        cmd_base = ["tmux", "-S", socket_path]
-
-    try:
-        # Load prompt into buffer via stdin
-        subprocess.run(
-            cmd_base + ["load-buffer", "-"],
-            input=prompt.encode(), capture_output=True, timeout=5
-        )
-        # Paste buffer into target pane
-        subprocess.run(
-            cmd_base + ["paste-buffer", "-t", pane, "-d"],
-            capture_output=True, timeout=5
-        )
-        # Send Enter
-        subprocess.run(
-            cmd_base + ["send-keys", "-t", pane, "Enter"],
-            capture_output=True, timeout=5
-        )
-        return True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def send_prompt(session_info, prompt_text):
-    """Send a prompt to a session, dispatching to the appropriate platform method."""
-    if IS_WINDOWS:
-        console_pid = session_info.get("console_pid")
-        if console_pid:
-            return win_send_prompt(console_pid, prompt_text)
-        return False
-    # Linux/macOS: use tmux
-    return tmux_send_prompt(session_info, prompt_text)
 
 
 

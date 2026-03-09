@@ -882,7 +882,7 @@ def _notification_loop():
 
 def _scan_once():
     """Single scan iteration - poll sessions, sync transcripts, handle permissions."""
-    sessions_data = _server_get("/api/sessions")
+    sessions_data = _server_get("/api/sessions?local_only=1")
     if not sessions_data:
         return
 

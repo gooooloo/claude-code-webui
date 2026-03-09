@@ -583,7 +583,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 entry["machine"] = local_name
                 session_machine_map[entry["session_id"]] = None
 
-            if remote_servers:
+            qs = parse_qs(parsed.query)
+            local_only = qs.get("local_only", [""])[0] == "1"
+
+            if remote_servers and not local_only:
                 remote_results = fetch_remote_sessions()
                 for remote, remote_sessions in remote_results:
                     if remote_sessions is None:

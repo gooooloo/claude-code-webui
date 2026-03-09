@@ -49,6 +49,89 @@ HTML_PAGE = """<!DOCTYPE html>
     justify-content: center;
   }
   .btn-scroll-bottom:hover { background: #3a3a5a; }
+  .btn-settings {
+    background: #2a2a4a;
+    color: #a78bfa;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-settings:hover { background: #3a3a5a; }
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: #1e1e3a;
+    border: 1px solid #3a3a5a;
+    border-radius: 12px;
+    padding: 24px;
+    width: 90%;
+    max-width: 520px;
+    max-height: 80vh;
+    overflow-y: auto;
+    color: #e0e0e0;
+  }
+  .modal h2 { font-size: 16px; color: #a78bfa; margin-bottom: 16px; }
+  .modal label { font-size: 13px; color: #bbb; display: block; margin-bottom: 4px; }
+  .modal input[type="text"] {
+    width: 100%;
+    background: #2a2a4a;
+    border: 1px solid #3a3a5a;
+    color: #e0e0e0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .modal input[type="text"]:focus { outline: none; border-color: #a78bfa; }
+  .remote-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+  .remote-row input { flex: 1; margin-bottom: 0; }
+  .remote-row .btn-rm {
+    background: #4a2a2a;
+    color: #f87171;
+    border: none;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .remote-row .btn-rm:hover { background: #5a2a2a; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+  .modal-actions button {
+    padding: 8px 18px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .modal-actions .btn-save { background: #a78bfa; color: #1a1a2e; font-weight: 600; }
+  .modal-actions .btn-save:hover { background: #b99dff; }
+  .modal-actions .btn-cancel { background: #2a2a4a; color: #e0e0e0; }
+  .modal-actions .btn-cancel:hover { background: #3a3a5a; }
+  .btn-add-remote {
+    background: #2a2a4a;
+    color: #a78bfa;
+    border: 1px dashed #3a3a5a;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .btn-add-remote:hover { background: #3a3a5a; }
   .header .back-btn {
     background: #2a2a4a;
     color: #a78bfa;
@@ -655,6 +738,20 @@ HTML_PAGE = """<!DOCTYPE html>
   <h1 id="pageTitle" ondblclick="window.scrollTo({top:0,behavior:'smooth'})">Claude Sessions</h1>
   <button class="btn-scroll-bottom" id="collapseAllBtn" onclick="collapseAll()" style="display:flex">Collapse All</button>
   <button class="btn-scroll-bottom" id="scrollBottomBtn" onclick="window.scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})">Bottom</button>
+  <button class="btn-settings" id="settingsBtn" onclick="openSettings()" title="Settings">&#9881;</button>
+</div>
+
+<!-- Settings modal -->
+<div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <h2>Remote Servers</h2>
+    <div id="remotesContainer"></div>
+    <button class="btn-add-remote" onclick="addRemoteRow()">+ Add Remote</button>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="btn-save" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- Dashboard view -->
@@ -688,6 +785,21 @@ HTML_PAGE = """<!DOCTYPE html>
 </div>
 
 <script>
+// ── Inject X-Remotes header into all API fetches ──
+const _origFetch = window.fetch;
+window.fetch = function(url, opts) {
+  if (typeof url === 'string' && url.startsWith('/api/')) {
+    const remotes = localStorage.getItem('claude-webui-remotes');
+    if (remotes && remotes !== '[]') {
+      opts = opts || {};
+      opts.headers = opts.headers instanceof Headers
+        ? opts.headers : new Headers(opts.headers || {});
+      opts.headers.set('X-Remotes', remotes);
+    }
+  }
+  return _origFetch.call(this, url, opts);
+};
+
 // ── State ──
 let currentView = 'dashboard';
 let currentSessionId = null;
@@ -1731,6 +1843,48 @@ document.getElementById('promptInput').addEventListener('paste', function(e) {
     fetchSessions();
   }
 })();
+
+// ── Settings (localStorage-driven, per-browser) ──
+const LS_KEY_REMOTES = 'claude-webui-remotes';
+
+function openSettings() {
+  let remotes = [];
+  try { remotes = JSON.parse(localStorage.getItem(LS_KEY_REMOTES) || '[]'); } catch(e) {}
+  const container = document.getElementById('remotesContainer');
+  container.innerHTML = '';
+  remotes.forEach(r => addRemoteRow(r.name, r.url));
+  if (remotes.length === 0) addRemoteRow();
+  document.getElementById('settingsModal').classList.add('active');
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.remove('active');
+}
+
+function addRemoteRow(name, url) {
+  const c = document.getElementById('remotesContainer');
+  const row = document.createElement('div');
+  row.className = 'remote-row';
+  row.innerHTML = '<input type="text" placeholder="Name" value="' + esc(name || '') + '">'
+    + '<input type="text" placeholder="http://host:19836" value="' + esc(url || '') + '">'
+    + '<button class="btn-rm" onclick="this.parentElement.remove()">X</button>';
+  c.appendChild(row);
+}
+
+function saveSettings() {
+  const rows = document.querySelectorAll('#remotesContainer .remote-row');
+  const remotes = [];
+  rows.forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    const name = inputs[0].value.trim();
+    const url = inputs[1].value.trim();
+    if (name && url) remotes.push({name, url});
+  });
+  localStorage.setItem(LS_KEY_REMOTES, JSON.stringify(remotes));
+  closeSettings();
+  fetchSessions();
+}
+
 
 // ── Polling ──
 pollTimer = setInterval(() => {

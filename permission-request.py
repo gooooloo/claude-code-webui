@@ -151,6 +151,53 @@ def build_detail(tool_name, tool_input):
     return detail, detail_sub, allow_pattern, allow_patterns
 
 
+def _match_allow_pattern(tool_name, detail, pattern):
+    """Check if a single detail string matches an allow pattern."""
+    if not pattern:
+        return False
+    # Exact tool name match (e.g., "Read", "WebSearch", "Bash")
+    if pattern == tool_name:
+        return True
+    # Check ToolName(glob) pattern
+    prefix = f"{tool_name}("
+    if pattern.startswith(prefix) and pattern.endswith(")"):
+        inner = pattern[len(prefix):-1]
+        # Convert ":*" suffix to just "*" for fnmatch
+        glob_inner = inner.replace(":*", "*")
+        if fnmatch.fnmatch(detail, glob_inner):
+            return True
+    return False
+
+
+def _check_single_command(tool_name, command_str, allow_list):
+    """Check if a single (non-compound) command matches any allow pattern."""
+    command_str = command_str.strip()
+    if not command_str:
+        return True
+    # Build detail for this single command (first_line as detail)
+    first_line = command_str.split("\n")[0].strip()
+    for pattern in allow_list:
+        if _match_allow_pattern(tool_name, first_line, pattern):
+            return True
+        # Also try matching with just the base command + subcommand
+        tokens = first_line.split()
+        if tokens:
+            base = os.path.basename(tokens[0])
+            if base:
+                sub = ""
+                for t in tokens[1:]:
+                    if not t.startswith(("-", "/", ".")):
+                        sub = t
+                        break
+                # Try "base sub ..." and "base ..."
+                detail_with_sub = f"{base} {sub}" if sub else base
+                if _match_allow_pattern(tool_name, detail_with_sub, pattern):
+                    return True
+                if _match_allow_pattern(tool_name, base, pattern):
+                    return True
+    return False
+
+
 def check_auto_allow(tool_name, detail, settings_file):
     """Check if this tool call matches any pre-approved pattern in settings.local.json."""
     if not os.path.isfile(settings_file):
@@ -165,20 +212,21 @@ def check_auto_allow(tool_name, detail, settings_file):
     if not allow_list:
         return False
 
-    for pattern in allow_list:
-        if not pattern:
-            continue
-        # Exact tool name match (e.g., "Read", "WebSearch")
-        if pattern == tool_name:
+    # For Bash commands, split compound commands and check each part
+    if tool_name in ("Bash", "mcp__acp__Bash"):
+        parts = re.split(r'\||\&\&|;', detail)
+        non_empty = [p for p in parts if p.strip()]
+        if non_empty and all(
+            _check_single_command(tool_name, p, allow_list)
+            for p in non_empty
+        ):
             return True
-        # Check ToolName(glob) pattern
-        prefix = f"{tool_name}("
-        if pattern.startswith(prefix) and pattern.endswith(")"):
-            inner = pattern[len(prefix):-1]
-            # Convert ":*" suffix to just "*" for fnmatch
-            glob_inner = inner.replace(":*", "*")
-            if fnmatch.fnmatch(detail, glob_inner):
-                return True
+        return False
+
+    # Non-Bash tools: direct match
+    for pattern in allow_list:
+        if _match_allow_pattern(tool_name, detail, pattern):
+            return True
     return False
 
 
@@ -220,6 +268,13 @@ def main():
     # Auto-allow check
     if check_auto_allow(tool_name, detail, settings_file):
         allow_response()
+
+    # Auto-allow tmux commands (used by the WebUI for prompt delivery)
+    if tool_name in ("Bash", "mcp__acp__Bash"):
+        command = tool_input.get("command", "").strip()
+        first_token = command.split()[0] if command.split() else ""
+        if os.path.basename(first_token) == "tmux":
+            allow_response()
 
     # Server offline fallback
     if not server_is_online():

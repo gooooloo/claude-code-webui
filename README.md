@@ -191,8 +191,7 @@ The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<ran
 
 | Argument | Purpose |
 |----------|---------|
-| `--hub <url>` | Full URL of the hub server |
-| `--hub-tunnel-id <id>` | DevTunnels ID of the hub (shorthand) |
+| `--hub-tunnel-id <id>` | DevTunnels ID of the hub, registers this machine with the hub |
 | `--tunnel-id <id>` | This machine's DevTunnels ID |
 | `--detect-tunnel` | Auto-detect devtunnel ID via `devtunnel list` |
 | `--name <name>` | Display name for this machine (default: `local`) |

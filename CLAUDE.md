@@ -160,13 +160,12 @@ MultiView (`/multiview`) provides a centralized page to access the same WebUI se
 
 | Argument | Purpose |
 |----------|---------|
-| `--hub` | URL of the central MultiView hub |
-| `--hub-tunnel-id` | DevTunnels ID of the hub (shorthand, expands to `https://<id>-19836.asse.devtunnels.ms`) |
+| `--hub-tunnel-id` | DevTunnels ID of the hub, registers this machine with the hub |
 | `--tunnel-id` | DevTunnels ID for this machine |
 | `--detect-tunnel` | Auto-detect this machine's devtunnel ID via `devtunnel list` |
 
 **How it works:**
-- Remote servers with `--hub` send a heartbeat (`POST /api/multiview/register`) every 30 seconds with their name and public URL
+- Remote servers with `--hub-tunnel-id` send a heartbeat (`POST /api/multiview/register`) every 30 seconds with their name and public URL
 - The hub keeps an in-memory registry; entries expire after 90 seconds without heartbeat
 - The MultiView page polls `GET /api/multiview/remotes` every 15 seconds and lists all machines with "Open" links (new tab)
 

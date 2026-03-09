@@ -1412,8 +1412,7 @@ def main():
     parser.add_argument("--remotes", help="Path to remotes.json (default: remotes.json in script dir)")
     parser.add_argument("--name", default="local", help="Name for this machine in dashboard (default: local)")
     parser.add_argument("--lan", action="store_true", help="Listen on 0.0.0.0 instead of 127.0.0.1 (allow LAN access)")
-    parser.add_argument("--hub", help="URL of central MultiView hub, or use --hub-tunnel-id for shorthand")
-    parser.add_argument("--hub-tunnel-id", help="DevTunnels ID of the hub (e.g. abc123), expands to https://abc123-19836.asse.devtunnels.ms")
+    parser.add_argument("--hub-tunnel-id", help="DevTunnels ID of the hub (e.g. abc123), registers this machine with the hub")
     parser.add_argument("--tunnel-id", help="DevTunnels ID for this machine (e.g. 1c6j6jlh), used to derive public URL")
     parser.add_argument("--detect-tunnel", action="store_true", help="Auto-detect devtunnel ID by running 'devtunnel list'")
     args = parser.parse_args()
@@ -1460,11 +1459,8 @@ def main():
             print(f"[teams] Failed to start: {e}")
 
     # MultiView hub registration heartbeat
-    hub_arg = args.hub
-    if not hub_arg and args.hub_tunnel_id:
-        hub_arg = f"https://{args.hub_tunnel_id}-{PORT}.asse.devtunnels.ms"
-    if hub_arg:
-        hub_url = hub_arg.rstrip("/")
+    if args.hub_tunnel_id:
+        hub_url = f"https://{args.hub_tunnel_id}-{PORT}.asse.devtunnels.ms"
         # Determine this machine's public URL
         tunnel_id = args.tunnel_id
         if not tunnel_id and args.detect_tunnel:

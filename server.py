@@ -874,8 +874,8 @@ class WebUIHandler(BaseHTTPRequestHandler):
             cwd = body.get("cwd", "")
 
             with sessions_lock:
-                # Evict other sessions on the same tmux pane (only on startup)
-                if source == "startup" and tmux_pane:
+                # Evict other sessions on the same tmux pane (startup/resume = new process)
+                if source in ("startup", "resume") and tmux_pane:
                     evict = [k for k, v in sessions.items() if k != sid and v.get("tmux_pane") == tmux_pane]
                     for k in evict:
                         del sessions[k]
@@ -885,8 +885,8 @@ class WebUIHandler(BaseHTTPRequestHandler):
                     if evict:
                         print(f"[~] Evicted session(s) on pane {tmux_pane}: {evict}")
 
-                # Evict other sessions on the same Windows console_pid (only on startup)
-                if source == "startup" and console_pid:
+                # Evict other sessions on the same Windows console_pid (startup/resume = new process)
+                if source in ("startup", "resume") and console_pid:
                     evict = [k for k, v in sessions.items() if k != sid and v.get("console_pid") == console_pid]
                     for k in evict:
                         del sessions[k]

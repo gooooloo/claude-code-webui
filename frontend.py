@@ -653,7 +653,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <div class="header">
   <button class="back-btn" id="backBtn" onclick="showDashboard()">Back</button>
   <h1 id="pageTitle" ondblclick="window.scrollTo({top:0,behavior:'smooth'})">Claude Sessions</h1>
-  <a href="/multiview" class="btn-scroll-bottom" style="display:flex;text-decoration:none">Machines</a>
+  <a href="/multiview" class="btn-scroll-bottom" id="machinesBtn" style="display:none;text-decoration:none">Machines</a>
   <button class="btn-scroll-bottom" id="collapseAllBtn" onclick="collapseAll()" style="display:flex">Collapse All</button>
   <button class="btn-scroll-bottom" id="scrollBottomBtn" onclick="window.scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})">Bottom</button>
 </div>
@@ -1734,6 +1734,15 @@ document.getElementById('promptInput').addEventListener('paste', function(e) {
     fetchSessions();
   }
 })();
+
+// ── Machines button visibility ──
+function checkMachinesBtn() {
+  fetch('/api/multiview/remotes').then(r => r.json()).then(d => {
+    document.getElementById('machinesBtn').style.display = (d.remotes && d.remotes.length > 1) ? 'flex' : 'none';
+  }).catch(() => {});
+}
+checkMachinesBtn();
+setInterval(checkMachinesBtn, 30000);
 
 // ── Polling ──
 pollTimer = setInterval(() => {

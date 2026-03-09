@@ -127,7 +127,13 @@ The new install script automatically cleans up old `.sh` symlinks.
 
 ## Security note
 
-The server binds to `0.0.0.0:19836` by default, making it accessible from your local network. This is intentional — it allows you to approve requests from a phone or another device. If you only need local access, change the bind address to `127.0.0.1` in `server.py`.
+The server binds to `127.0.0.1:19836` by default (local access only). To allow LAN access (e.g. approve requests from a phone or another device), use `--lan`:
+
+```bash
+python3 server.py --lan
+```
+
+This binds to `0.0.0.0:19836`, making it accessible from your local network.
 
 There is no authentication on the web UI. Anyone on your network who can reach port 19836 can approve or deny requests. Use on trusted networks only, or add your own auth layer.
 

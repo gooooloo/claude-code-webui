@@ -1330,6 +1330,7 @@ def main():
     parser = argparse.ArgumentParser(description="Claude Code WebUI Server")
     parser.add_argument("--remotes", help="Path to remotes.json (default: remotes.json in script dir)")
     parser.add_argument("--name", default="local", help="Name for this machine in dashboard (default: local)")
+    parser.add_argument("--lan", action="store_true", help="Listen on 0.0.0.0 instead of 127.0.0.1 (allow LAN access)")
     args = parser.parse_args()
 
     global local_name, remote_servers
@@ -1373,8 +1374,9 @@ def main():
         except Exception as e:
             print(f"[teams] Failed to start: {e}")
 
-    server = HTTPServer(("0.0.0.0", PORT), WebUIHandler)
-    print(f"Claude Code WebUI Server running on http://localhost:{PORT}")
+    bind_addr = "0.0.0.0" if args.lan else "127.0.0.1"
+    server = HTTPServer((bind_addr, PORT), WebUIHandler)
+    print(f"Claude Code WebUI Server running on http://{bind_addr}:{PORT}")
     print(f"Watching: {QUEUE_DIR}")
     print("Transcript-driven architecture | Tmux-only prompt delivery")
     print("Press Ctrl+C to stop")

@@ -156,22 +156,24 @@ Login and create a **named tunnel** (persistent — survives reboots, only `devt
 
 ```powershell
 devtunnel login
-devtunnel create $env:COMPUTERNAME
-devtunnel port create $env:COMPUTERNAME -p 19836
+$TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+devtunnel create $TunnelId
+devtunnel port create $TunnelId -p 19836
 ```
 
 Each time you need the tunnel active, just host it:
 
 ```powershell
-devtunnel host $env:COMPUTERNAME
+$TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+devtunnel host $TunnelId
 ```
 
 The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<random-id>` is assigned once at creation time and stays the same as long as you don't delete the tunnel (the custom tunnel ID is for command convenience, not part of the URL). You can find the random ID via `devtunnel list`.
 
 > **Tip:** You can expose multiple ports on the same tunnel:
 > ```powershell
-> devtunnel port create $env:COMPUTERNAME -p 8080
-> devtunnel port create $env:COMPUTERNAME -p 3000
+> devtunnel port create $TunnelId -p 8080
+> devtunnel port create $TunnelId -p 3000
 > ```
 > Each port gets its own URL: `https://<random-id>-8080.asse.devtunnels.ms`, etc.
 
@@ -184,7 +186,8 @@ The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<ran
    ```
    ```powershell
    # Window 2: host the tunnel
-   devtunnel host $env:COMPUTERNAME
+   $TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+   devtunnel host $TunnelId
    ```
 
 2. **Start remote servers** with `--hub-tunnel-id` pointing to the hub's random ID. Run in separate windows:
@@ -197,7 +200,8 @@ The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<ran
    ```
    ```powershell
    # Window 2: host the tunnel
-   devtunnel host $env:COMPUTERNAME
+   $TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+   devtunnel host $TunnelId
    ```
 
 3. Open `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — all registered machines appear automatically.

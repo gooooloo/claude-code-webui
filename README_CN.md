@@ -156,22 +156,24 @@ brew install --cask devtunnel
 
 ```powershell
 devtunnel login
-devtunnel create $env:COMPUTERNAME
-devtunnel port create $env:COMPUTERNAME -p 19836
+$TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+devtunnel create $TunnelId
+devtunnel port create $TunnelId -p 19836
 ```
 
 每次需要激活 tunnel 时，只需 host：
 
 ```powershell
-devtunnel host $env:COMPUTERNAME
+$TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+devtunnel host $TunnelId
 ```
 
 公网 URL 格式为 `https://<random-id>-19836.asse.devtunnels.ms`。`<random-id>` 在创建时分配，只要不 delete 就不会变（自定义 tunnel ID 只是方便命令引用，不会出现在 URL 中）。可以通过 `devtunnel list` 查看。
 
 > **提示：** 同一个 tunnel 可以暴露多个端口：
 > ```powershell
-> devtunnel port create $env:COMPUTERNAME -p 8080
-> devtunnel port create $env:COMPUTERNAME -p 3000
+> devtunnel port create $TunnelId -p 8080
+> devtunnel port create $TunnelId -p 3000
 > ```
 > 每个端口有独立的 URL：`https://<random-id>-8080.asse.devtunnels.ms` 等。
 
@@ -184,7 +186,8 @@ devtunnel host $env:COMPUTERNAME
    ```
    ```powershell
    # 窗口 2：启动 tunnel
-   devtunnel host $env:COMPUTERNAME
+   $TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+   devtunnel host $TunnelId
    ```
 
 2. **启动远程服务器**，用 `--hub-tunnel-id` 指向 hub 的 random ID。在不同窗口分别运行：
@@ -197,7 +200,8 @@ devtunnel host $env:COMPUTERNAME
    ```
    ```powershell
    # 窗口 2：启动 tunnel
-   devtunnel host $env:COMPUTERNAME
+   $TunnelId = ($env:COMPUTERNAME.ToLower() -replace '[^a-z0-9-]', '-')
+   devtunnel host $TunnelId
    ```
 
 3. 打开 `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — 所有注册的机器会自动出现。

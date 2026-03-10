@@ -80,8 +80,15 @@ def update_session_state(sid):
         with open(path, "rb") as f:
             f.seek(offset)
             new_data = f.read()
-    except IOError:
-        new_data = b""
+    except IOError as e:
+        print(f"[!] Failed to read transcript for session {sid}: {e}, retrying...")
+        time.sleep(1)
+        try:
+            with open(path, "rb") as f:
+                f.seek(offset)
+                new_data = f.read()
+        except IOError:
+            new_data = b""
 
     if new_data:
         text = new_data.decode("utf-8", errors="replace")

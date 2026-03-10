@@ -154,33 +154,37 @@ brew install --cask devtunnel
 
 登录并创建**命名 tunnel**（持久化 — 重启不丢失，只有 `devtunnel delete` 才会删除）：
 
-```bash
+```powershell
+$TunnelId = $env:COMPUTERNAME   # 或自定义名称，如 $TunnelId = "gpu-a100"
+
 devtunnel login
-devtunnel create --id my-machine        # 命名 ID，方便本地引用
-devtunnel port create --tunnel-id my-machine --port-number 19836
+devtunnel create $TunnelId
+devtunnel port create $TunnelId -p 19836
 ```
 
 每次需要激活 tunnel 时，只需 host：
 
-```bash
-devtunnel host --tunnel-id my-machine
+```powershell
+$TunnelId = $env:COMPUTERNAME
+devtunnel host $TunnelId
 ```
 
-公网 URL 格式为 `https://<random-id>-19836.asse.devtunnels.ms`。`<random-id>` 在创建时分配，只要不 delete 就不会变。可以通过 `devtunnel list` 查看。
+公网 URL 格式为 `https://<random-id>-19836.asse.devtunnels.ms`。`<random-id>` 在创建时分配，只要不 delete 就不会变（自定义 tunnel ID 只是方便命令引用，不会出现在 URL 中）。可以通过 `devtunnel list` 查看。
 
 > **提示：** 同一个 tunnel 可以暴露多个端口：
-> ```bash
-> devtunnel port create --tunnel-id my-machine --port-number 8080
-> devtunnel port create --tunnel-id my-machine --port-number 3000
+> ```powershell
+> devtunnel port create $TunnelId -p 8080
+> devtunnel port create $TunnelId -p 3000
 > ```
 > 每个端口有独立的 URL：`https://<random-id>-8080.asse.devtunnels.ms` 等。
 
 ### Machines 配置
 
 1. **选一台机器作为 hub**（你在浏览器上打开的那台）：
-   ```bash
+   ```powershell
+   $TunnelId = $env:COMPUTERNAME
    python3 server.py --name hub
-   devtunnel host --tunnel-id hub-machine
+   devtunnel host $TunnelId
    ```
 
 2. **启动远程服务器**，用 `--hub-tunnel-id` 指向 hub 的 random ID：

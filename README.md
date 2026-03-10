@@ -154,33 +154,37 @@ brew install --cask devtunnel
 
 Login and create a **named tunnel** (persistent — survives reboots, only `devtunnel delete` removes it):
 
-```bash
+```powershell
+$TunnelId = $env:COMPUTERNAME   # or set a custom name, e.g. $TunnelId = "gpu-a100"
+
 devtunnel login
-devtunnel create --id my-machine        # named ID for local reference
-devtunnel port create --tunnel-id my-machine --port-number 19836
+devtunnel create $TunnelId
+devtunnel port create $TunnelId -p 19836
 ```
 
 Each time you need the tunnel active, just host it:
 
-```bash
-devtunnel host --tunnel-id my-machine
+```powershell
+$TunnelId = $env:COMPUTERNAME
+devtunnel host $TunnelId
 ```
 
-The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<random-id>` is assigned once at creation time and stays the same as long as you don't delete the tunnel. You can find it via `devtunnel list`.
+The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<random-id>` is assigned once at creation time and stays the same as long as you don't delete the tunnel (the custom tunnel ID is for command convenience, not part of the URL). You can find the random ID via `devtunnel list`.
 
 > **Tip:** You can expose multiple ports on the same tunnel:
-> ```bash
-> devtunnel port create --tunnel-id my-machine --port-number 8080
-> devtunnel port create --tunnel-id my-machine --port-number 3000
+> ```powershell
+> devtunnel port create $TunnelId -p 8080
+> devtunnel port create $TunnelId -p 3000
 > ```
 > Each port gets its own URL: `https://<random-id>-8080.asse.devtunnels.ms`, etc.
 
 ### Machines setup
 
 1. **Pick one machine as the hub** (the one you'll open in your browser):
-   ```bash
+   ```powershell
+   $TunnelId = $env:COMPUTERNAME
    python3 server.py --name hub
-   devtunnel host --tunnel-id hub-machine
+   devtunnel host $TunnelId
    ```
 
 2. **Start remote servers** with `--hub-tunnel-id` pointing to the hub's random ID:

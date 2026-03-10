@@ -155,45 +155,49 @@ brew install --cask devtunnel
 登录并创建**命名 tunnel**（持久化 — 重启不丢失，只有 `devtunnel delete` 才会删除）：
 
 ```powershell
-$TunnelId = $env:COMPUTERNAME   # 或自定义名称，如 $TunnelId = "gpu-a100"
-
 devtunnel login
-devtunnel create $TunnelId
-devtunnel port create $TunnelId -p 19836
+devtunnel create $env:COMPUTERNAME
+devtunnel port create $env:COMPUTERNAME -p 19836
 ```
 
 每次需要激活 tunnel 时，只需 host：
 
 ```powershell
-$TunnelId = $env:COMPUTERNAME
-devtunnel host $TunnelId
+devtunnel host $env:COMPUTERNAME
 ```
 
 公网 URL 格式为 `https://<random-id>-19836.asse.devtunnels.ms`。`<random-id>` 在创建时分配，只要不 delete 就不会变（自定义 tunnel ID 只是方便命令引用，不会出现在 URL 中）。可以通过 `devtunnel list` 查看。
 
 > **提示：** 同一个 tunnel 可以暴露多个端口：
 > ```powershell
-> devtunnel port create $TunnelId -p 8080
-> devtunnel port create $TunnelId -p 3000
+> devtunnel port create $env:COMPUTERNAME -p 8080
+> devtunnel port create $env:COMPUTERNAME -p 3000
 > ```
 > 每个端口有独立的 URL：`https://<random-id>-8080.asse.devtunnels.ms` 等。
 
 ### Machines 配置
 
-1. **选一台机器作为 hub**（你在浏览器上打开的那台）：
+1. **选一台机器作为 hub**（你在浏览器上打开的那台）。在不同窗口分别运行：
    ```powershell
-   $TunnelId = $env:COMPUTERNAME
-   python3 server.py --name hub
-   devtunnel host $TunnelId
+   # 窗口 1：启动服务器
+   python3 server.py --name $env:COMPUTERNAME
+   ```
+   ```powershell
+   # 窗口 2：启动 tunnel
+   devtunnel host $env:COMPUTERNAME
    ```
 
-2. **启动远程服务器**，用 `--hub-tunnel-id` 指向 hub 的 random ID：
-   ```bash
-   # 手动指定 tunnel ID（通过 `devtunnel list` 查看）
-   python3 server.py --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
+2. **启动远程服务器**，用 `--hub-tunnel-id` 指向 hub 的 random ID。在不同窗口分别运行：
+   ```powershell
+   # 窗口 1：启动服务器（手动指定 tunnel ID，通过 `devtunnel list` 查看）
+   python3 server.py --name $env:COMPUTERNAME --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
 
    # 或自动检测 tunnel ID
-   python3 server.py --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
+   python3 server.py --name $env:COMPUTERNAME --detect-tunnel --hub-tunnel-id abc123
+   ```
+   ```powershell
+   # 窗口 2：启动 tunnel
+   devtunnel host $env:COMPUTERNAME
    ```
 
 3. 打开 `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — 所有注册的机器会自动出现。

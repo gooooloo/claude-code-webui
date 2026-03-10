@@ -155,45 +155,49 @@ brew install --cask devtunnel
 Login and create a **named tunnel** (persistent — survives reboots, only `devtunnel delete` removes it):
 
 ```powershell
-$TunnelId = $env:COMPUTERNAME   # or set a custom name, e.g. $TunnelId = "gpu-a100"
-
 devtunnel login
-devtunnel create $TunnelId
-devtunnel port create $TunnelId -p 19836
+devtunnel create $env:COMPUTERNAME
+devtunnel port create $env:COMPUTERNAME -p 19836
 ```
 
 Each time you need the tunnel active, just host it:
 
 ```powershell
-$TunnelId = $env:COMPUTERNAME
-devtunnel host $TunnelId
+devtunnel host $env:COMPUTERNAME
 ```
 
 The public URL will be `https://<random-id>-19836.asse.devtunnels.ms`. The `<random-id>` is assigned once at creation time and stays the same as long as you don't delete the tunnel (the custom tunnel ID is for command convenience, not part of the URL). You can find the random ID via `devtunnel list`.
 
 > **Tip:** You can expose multiple ports on the same tunnel:
 > ```powershell
-> devtunnel port create $TunnelId -p 8080
-> devtunnel port create $TunnelId -p 3000
+> devtunnel port create $env:COMPUTERNAME -p 8080
+> devtunnel port create $env:COMPUTERNAME -p 3000
 > ```
 > Each port gets its own URL: `https://<random-id>-8080.asse.devtunnels.ms`, etc.
 
 ### Machines setup
 
-1. **Pick one machine as the hub** (the one you'll open in your browser):
+1. **Pick one machine as the hub** (the one you'll open in your browser). Run in separate windows:
    ```powershell
-   $TunnelId = $env:COMPUTERNAME
-   python3 server.py --name hub
-   devtunnel host $TunnelId
+   # Window 1: start the server
+   python3 server.py --name $env:COMPUTERNAME
+   ```
+   ```powershell
+   # Window 2: host the tunnel
+   devtunnel host $env:COMPUTERNAME
    ```
 
-2. **Start remote servers** with `--hub-tunnel-id` pointing to the hub's random ID:
-   ```bash
-   # With explicit tunnel ID (find it via `devtunnel list`)
-   python3 server.py --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
+2. **Start remote servers** with `--hub-tunnel-id` pointing to the hub's random ID. Run in separate windows:
+   ```powershell
+   # Window 1: start the server (with explicit tunnel ID, find it via `devtunnel list`)
+   python3 server.py --name $env:COMPUTERNAME --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
 
    # Or auto-detect tunnel ID
-   python3 server.py --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
+   python3 server.py --name $env:COMPUTERNAME --detect-tunnel --hub-tunnel-id abc123
+   ```
+   ```powershell
+   # Window 2: host the tunnel
+   devtunnel host $env:COMPUTERNAME
    ```
 
 3. Open `https://<hub-tunnel-id>-19836.asse.devtunnels.ms/multiview` — all registered machines appear automatically.

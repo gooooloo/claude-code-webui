@@ -688,6 +688,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <div class="multiselect-bar" id="multiSelectBar" style="display:none">
   <span id="multiSelectCount">0 selected</span>
   <button onclick="copySelected()">Copy</button>
+  <button onclick="exportSelectedHTML()">Export HTML</button>
   <button class="cancel-btn" onclick="exitMultiSelect()">Cancel</button>
 </div>
 <div class="toast" id="toast"></div>
@@ -1390,6 +1391,52 @@ function copySelected() {
   }).catch(() => {
     showToast('Copy failed');
   });
+}
+
+function exportSelectedHTML() {
+  const indices = Array.from(selectedMsgIndices).sort((a, b) => a - b);
+  const msgs = indices.map(i => {
+    const item = transcriptEntriesCache[i];
+    if (!item) return '';
+    return '<div class="msg ' + item.cls + '"><div class="msg-label">' + esc(item.label) + '</div><div class="msg-content">' + item.html + '</div></div>';
+  }).filter(Boolean);
+  const html = '<!DOCTYPE html>\\n<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Claude Transcript</title>\\n<style>\\n' +
+    '* { margin: 0; padding: 0; box-sizing: border-box; }\\n' +
+    'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: #1a1a2e; color: #e0e0e0; padding: 24px; }\\n' +
+    '.msg { margin-bottom: 12px; padding: 12px 16px; border-radius: 10px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }\\n' +
+    '.msg-user { background: #1e3a5f; border-left: 3px solid #3b82f6; }\\n' +
+    '.msg-assistant { background: #1a2744; border-left: 3px solid #a78bfa; }\\n' +
+    '.msg-tool { background: #0f0f23; border-left: 3px solid #f97316; font-size: 12px; }\\n' +
+    '.msg-system { background: #1a1a2e; border-left: 3px solid #6b7280; font-size: 12px; text-align: center; }\\n' +
+    '.msg-label { font-size: 11px; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; }\\n' +
+    '.msg-user .msg-label { color: #3b82f6; }\\n' +
+    '.msg-assistant .msg-label { color: #a78bfa; }\\n' +
+    '.msg-tool .msg-label { color: #f97316; }\\n' +
+    '.msg-system .msg-label { color: #6b7280; }\\n' +
+    '.msg-content { overflow: hidden; }\\n' +
+    '.md-h1, .md-h2, .md-h3 { font-weight: 700; margin: 4px 0 2px; }\\n' +
+    '.md-h1 { color: #a78bfa; font-size: 15px; }\\n' +
+    '.md-h2 { color: #c4b5fd; font-size: 14px; }\\n' +
+    '.md-h3 { color: #ddd6fe; font-size: 13px; }\\n' +
+    '.md-table { border-collapse: collapse; margin: 6px 0; width: auto; font-size: 12px; white-space: normal; }\\n' +
+    '.md-table th, .md-table td { border: 1px solid #444; padding: 4px 8px; text-align: left; }\\n' +
+    '.md-table th { background: #2a2a3a; font-weight: 600; color: #c4b5fd; }\\n' +
+    'code { background: #1e1e3a; color: #facc15; padding: 1px 5px; border-radius: 3px; font-size: 12px; }\\n' +
+    'strong { color: #fff; }\\n' +
+    'a { color: #60a5fa; }\\n' +
+    '</style></head><body>\\n' + msgs.join('\\n') + '\\n</body></html>';
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const d = new Date();
+  a.download = 'claude-transcript-' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Exported ' + indices.length + ' items');
+  exitMultiSelect();
 }
 
 function showToast(msg) {

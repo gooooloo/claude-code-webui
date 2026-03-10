@@ -1383,7 +1383,7 @@ function copySelected() {
     if (!item) return '';
     return item.copyLabel + ':\\n' + item.copyText;
   }).filter(Boolean);
-  const text = parts.join('\\n\\n');
+  const text = parts.join('\\n\\n---\\n\\n');
   navigator.clipboard.writeText(text).then(() => {
     showToast('Copied ' + indices.length + ' items');
     exitMultiSelect();

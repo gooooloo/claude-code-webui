@@ -122,41 +122,6 @@ HTML_PAGE = """<!DOCTYPE html>
   .sc-project + .sc-collapse-btn { margin-left: auto; }
   .session-card.collapsed .sc-collapse-btn { transform: rotate(-90deg); }
   .session-card.collapsed .sc-body { display: none; }
-  .machine-group-header {
-    font-size: 13px;
-    font-weight: 600;
-    color: #a78bfa;
-    padding: 12px 0 4px 0;
-    border-bottom: 1px solid #2a2a4a;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    user-select: none;
-  }
-  .machine-group-header:hover { color: #c4b5fd; }
-  .machine-group-header .mg-arrow {
-    display: inline-block;
-    transition: transform 0.15s;
-    font-size: 10px;
-  }
-  .machine-group-header.mg-collapsed .mg-arrow { transform: rotate(-90deg); }
-  .machine-empty {
-    color: #555;
-    font-size: 13px;
-    padding: 8px 0 12px 0;
-  }
-  .sc-machine {
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: #2a2a4a;
-    color: #888;
-    margin-left: 6px;
-  }
   .sc-sid-row {
     margin-bottom: 6px;
   }
@@ -660,7 +625,6 @@ HTML_PAGE = """<!DOCTYPE html>
 <div class="header">
   <button class="back-btn" id="backBtn" onclick="showDashboard()">Back</button>
   <h1 id="pageTitle" ondblclick="window.scrollTo({top:0,behavior:'smooth'})">Claude Sessions</h1>
-  <a href="/multiview" class="btn-scroll-bottom" id="machinesBtn" style="display:none;text-decoration:none">Machines</a>
   <button class="btn-scroll-bottom" id="collapseAllBtn" onclick="collapseAll()" style="display:flex">Collapse All</button>
   <button class="btn-scroll-bottom" id="scrollBottomBtn" onclick="window.scrollTo({top:document.documentElement.scrollHeight,behavior:'smooth'})">Bottom</button>
 </div>
@@ -699,8 +663,7 @@ HTML_PAGE = """<!DOCTYPE html>
 // ── State ──
 let currentView = 'dashboard';
 let currentSessionId = null;
-let federationLocalName = 'local';
-let federationRemoteNames = [];
+let serverName = 'local';
 let respondedIds = new Set();
 let imagePaths = [];
 let pollTimer = null;
@@ -711,6 +674,8 @@ let lastTranscriptHash = '';
 // Question state
 const questionSelections = {};
 const questionMultiSelect = {};
+
+function titlePrefix() { return serverName !== 'local' ? serverName + ' \\u2014 ' : ''; }
 
 const _interactTime = {};
 function touchSession(sid) { _interactTime[sid] = Date.now(); }
@@ -736,35 +701,14 @@ function getCollapsedSet() {
 function isCollapsed(sid) { return getCollapsedSet().has(sid); }
 function sortDashboardCards() {
   const el = document.getElementById('sessionList');
-  if (federationRemoteNames.length > 0) {
-    // Federation mode: sort cards within each machine group
-    const headers = el.querySelectorAll('.machine-group-header[data-machine]');
-    headers.forEach(header => {
-      const cards = [];
-      let sibling = header.nextElementSibling;
-      while (sibling && !sibling.classList.contains('machine-group-header')) {
-        if (sibling.classList.contains('session-card')) cards.push(sibling);
-        sibling = sibling.nextElementSibling;
-      }
-      cards.sort((a, b) => {
-        const ca = a.classList.contains('collapsed') ? 1 : 0;
-        const cb = b.classList.contains('collapsed') ? 1 : 0;
-        if (ca !== cb) return ca - cb;
-        return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
-      });
-      let prev = header;
-      cards.forEach(c => { prev.after(c); prev = c; });
-    });
-  } else {
-    const cards = [...el.querySelectorAll('.session-card[data-sid]')];
-    cards.sort((a, b) => {
-      const ca = a.classList.contains('collapsed') ? 1 : 0;
-      const cb = b.classList.contains('collapsed') ? 1 : 0;
-      if (ca !== cb) return ca - cb;
-      return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
-    });
-    cards.forEach(c => el.appendChild(c));
-  }
+  const cards = [...el.querySelectorAll('.session-card[data-sid]')];
+  cards.sort((a, b) => {
+    const ca = a.classList.contains('collapsed') ? 1 : 0;
+    const cb = b.classList.contains('collapsed') ? 1 : 0;
+    if (ca !== cb) return ca - cb;
+    return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
+  });
+  cards.forEach(c => el.appendChild(c));
 }
 function toggleCollapse(sid, btn) {
   const set = getCollapsedSet();
@@ -789,27 +733,6 @@ function collapseAll() {
   lastDashboardHash = '';
 }
 
-function getCollapsedMachines() {
-  try { return new Set(JSON.parse(localStorage.getItem('collapsed_machines') || '[]')); }
-  catch { return new Set(); }
-}
-function isMachineCollapsed(machine) { return getCollapsedMachines().has(machine); }
-function toggleMachineCollapse(machine) {
-  const set = getCollapsedMachines();
-  if (set.has(machine)) set.delete(machine); else set.add(machine);
-  localStorage.setItem('collapsed_machines', JSON.stringify([...set]));
-  // Toggle header class
-  const header = document.querySelector('.machine-group-header[data-machine="' + machine + '"]');
-  if (header) header.classList.toggle('mg-collapsed');
-  // Toggle visibility of session cards and empty message under this machine
-  const el = document.getElementById('sessionList');
-  let sibling = header ? header.nextElementSibling : null;
-  while (sibling && !sibling.classList.contains('machine-group-header')) {
-    sibling.style.display = set.has(machine) ? 'none' : '';
-    sibling = sibling.nextElementSibling;
-  }
-  lastDashboardHash = '';
-}
 
 function renderMarkdown(text) {
   let s = esc(text.trim());
@@ -863,9 +786,7 @@ async function fetchSessions() {
   try {
     const res = await fetch('/api/sessions');
     const data = await res.json();
-    federationLocalName = data.local_name || 'local';
-    federationRemoteNames = data.remote_names || [];
-    document.title = federationLocalName + ' — Claude Sessions';
+    serverName = data.name || 'local';
     renderDashboard(data.sessions || []);
   } catch (e) {
     // connection error, silently retry on next poll
@@ -880,7 +801,6 @@ function buildCardHTML(s) {
   let html = '<div class="sc-top">';
   html += '<span class="state-badge badge-' + state + '" style="cursor:pointer" onclick="event.stopPropagation();openSession(\\'' + esc(s.session_id) + '\\')">' + stateLabel(state) + '</span>';
   html += '<span class="sc-project">' + esc(project) + '</span>';
-  if (s.machine && federationRemoteNames.length > 0) html += '<span class="sc-machine">' + esc(s.machine) + '</span>';
   if (time) html += '<span class="sc-time">' + time + '</span>';
   html += '<button class="sc-collapse-btn" onclick="event.stopPropagation();toggleCollapse(\\'' + esc(s.session_id) + '\\',this)" title="Collapse/Expand">&#9660;</button>';
   html += '</div>';
@@ -916,201 +836,79 @@ function cardHash(s) {
 
 function renderDashboard(sessions) {
   const el = document.getElementById('sessionList');
-  const hasFederation = federationRemoteNames.length > 0;
 
-  if (sessions.length === 0 && !hasFederation) {
+  if (sessions.length === 0) {
     if (lastDashboardHash !== 'empty') {
       el.innerHTML = '<div class="empty"><span class="dot"></span>No active sessions</div>';
       lastDashboardHash = 'empty';
     }
-    document.title = federationLocalName + ' \\u2014 Claude Sessions';
+    document.title = titlePrefix() + 'Claude Sessions';
     return;
   }
   const needAttention = sessions.filter(s =>
     s.state === 'permission_prompt' || s.state === 'elicitation' || s.state === 'plan_review' || s.state === 'idle'
   ).length;
-  var baseTitle = federationLocalName + ' \\u2014 Claude Sessions';
+  var baseTitle = titlePrefix() + 'Claude Sessions';
   document.title = needAttention > 0 ? '(' + needAttention + ') ' + baseTitle : baseTitle;
 
   const collapsedSet = getCollapsedSet();
 
-  if (!hasFederation) {
-    // No federation: original flat rendering
-    sessions.sort((a, b) => {
-      const ca = collapsedSet.has(a.session_id) ? 1 : 0;
-      const cb = collapsedSet.has(b.session_id) ? 1 : 0;
-      if (ca !== cb) return ca - cb;
-      return getInteractTime(b.session_id) - getInteractTime(a.session_id);
-    });
+  sessions.sort((a, b) => {
+    const ca = collapsedSet.has(a.session_id) ? 1 : 0;
+    const cb = collapsedSet.has(b.session_id) ? 1 : 0;
+    if (ca !== cb) return ca - cb;
+    return getInteractTime(b.session_id) - getInteractTime(a.session_id);
+  });
 
-    const desiredOrder = sessions.map(s => s.session_id);
-    const existingCards = el.querySelectorAll('.session-card[data-sid]');
-    const existingMap = {};
-    existingCards.forEach(c => { existingMap[c.getAttribute('data-sid')] = c; });
+  const desiredOrder = sessions.map(s => s.session_id);
+  const existingCards = el.querySelectorAll('.session-card[data-sid]');
+  const existingMap = {};
+  existingCards.forEach(c => { existingMap[c.getAttribute('data-sid')] = c; });
 
-    existingCards.forEach(c => {
-      if (!desiredOrder.includes(c.getAttribute('data-sid'))) c.remove();
-    });
+  existingCards.forEach(c => {
+    if (!desiredOrder.includes(c.getAttribute('data-sid'))) c.remove();
+  });
 
-    let prevNode = null;
-    sessions.forEach(s => {
-      const sid = s.session_id;
-      const state = s.state || 'busy';
-      const hue = sessionHue(sid);
-      const h = cardHash(s);
-      let card = existingMap[sid];
-      if (card) {
-        const collapsed = isCollapsed(sid) ? ' collapsed' : '';
-        card.className = 'session-card state-' + state + collapsed;
-        card.style.cssText = '--sh:' + hue;
-        const prev = card.getAttribute('data-hash');
-        if (prev !== h) {
-          const focused = document.activeElement;
-          if (!(focused && focused.id === 'dashPrompt-' + sid)) {
-            card.innerHTML = buildCardHTML(s);
-            card.setAttribute('data-hash', h);
-          }
-        }
-      } else {
-        card = document.createElement('div');
-        card.setAttribute('data-sid', sid);
-        card.setAttribute('data-hash', h);
-        const collapsed = isCollapsed(sid) ? ' collapsed' : '';
-        card.className = 'session-card state-' + state + collapsed;
-        card.style.cssText = '--sh:' + hue;
-        card.innerHTML = buildCardHTML(s);
-        el.appendChild(card);
-      }
-      if (prevNode) {
-        if (card.previousElementSibling !== prevNode) {
-          prevNode.after(card);
-        }
-      } else {
-        if (card !== el.firstElementChild) {
-          el.prepend(card);
-        }
-      }
-      prevNode = card;
-    });
-  } else {
-    // Federation: group by machine
-    const groups = {};
-    const ln = federationLocalName;
-    groups[ln] = [];
-    federationRemoteNames.forEach(n => { if (!groups[n]) groups[n] = []; });
-    sessions.forEach(s => {
-      const m = s.machine || ln;
-      if (!groups[m]) groups[m] = [];
-      groups[m].push(s);
-    });
-
-    // Sort within groups
-    Object.values(groups).forEach(arr => {
-      arr.sort((a, b) => {
-        const ca = collapsedSet.has(a.session_id) ? 1 : 0;
-        const cb = collapsedSet.has(b.session_id) ? 1 : 0;
-        if (ca !== cb) return ca - cb;
-        return getInteractTime(b.session_id) - getInteractTime(a.session_id);
-      });
-    });
-
-    // Incremental DOM updates for federation groups
-    const groupOrder = [ln, ...federationRemoteNames.filter(n => n !== ln).sort()];
-
-    const existingById = {};
-    el.querySelectorAll('.session-card[data-sid]').forEach(c => { existingById[c.getAttribute('data-sid')] = c; });
-    const desiredSids = new Set(sessions.map(s => s.session_id));
-    const desiredMachines = new Set(groupOrder);
-
-    // Remove orphaned elements
-    el.querySelectorAll('.session-card[data-sid]').forEach(c => {
-      if (!desiredSids.has(c.getAttribute('data-sid'))) c.remove();
-    });
-    el.querySelectorAll('.machine-group-header[data-machine]').forEach(h => {
-      if (!desiredMachines.has(h.getAttribute('data-machine'))) h.remove();
-    });
-    el.querySelectorAll('.machine-empty[data-machine]').forEach(e => {
-      if (!desiredMachines.has(e.getAttribute('data-machine'))) e.remove();
-    });
-
-    let prevNode = null;
-    function posAfter(node) {
-      if (!node.parentNode) el.appendChild(node);
-      if (prevNode) {
-        if (node.previousElementSibling !== prevNode) prevNode.after(node);
-      } else {
-        if (node !== el.firstElementChild) el.prepend(node);
-      }
-      prevNode = node;
-    }
-
-    groupOrder.forEach(machine => {
-      const arr = groups[machine] || [];
-
-      // Header
-      let header = el.querySelector('.machine-group-header[data-machine="' + machine + '"]');
-      if (!header) {
-        header = document.createElement('div');
-        header.setAttribute('data-machine', machine);
-      }
-      header.className = 'machine-group-header' + (isMachineCollapsed(machine) ? ' mg-collapsed' : '');
-      header.onclick = function() { toggleMachineCollapse(machine); };
-      const cnt = arr.length;
-      header.innerHTML = '<span class="mg-arrow">&#9660;</span>' + esc(machine) + ' <span style="font-size:11px;opacity:0.5;text-transform:none;font-weight:400">(' + cnt + ')</span>';
-      posAfter(header);
-
-      const mgHidden = isMachineCollapsed(machine);
-
-      if (arr.length === 0) {
-        let empty = el.querySelector('.machine-empty[data-machine="' + machine + '"]');
-        if (!empty) {
-          empty = document.createElement('div');
-          empty.className = 'machine-empty';
-          empty.setAttribute('data-machine', machine);
-          empty.textContent = 'No active sessions';
-        }
-        empty.style.display = mgHidden ? 'none' : '';
-        posAfter(empty);
-      } else {
-        const empty = el.querySelector('.machine-empty[data-machine="' + machine + '"]');
-        if (empty) empty.remove();
-      }
-
-      arr.forEach(s => {
-        const sid = s.session_id;
-        const state = s.state || 'busy';
-        const hue = sessionHue(sid);
-        const h = cardHash(s);
-        let card = existingById[sid];
-        if (card) {
-          const collapsed = isCollapsed(sid) ? ' collapsed' : '';
-          card.className = 'session-card state-' + state + collapsed;
-          card.style.cssText = '--sh:' + hue + (mgHidden ? ';display:none' : '');
-          if (card.getAttribute('data-hash') !== h) {
-            const focused = document.activeElement;
-            if (!(focused && focused.id === 'dashPrompt-' + sid)) {
-              card.innerHTML = buildCardHTML(s);
-              card.setAttribute('data-hash', h);
-            }
-          }
-        } else {
-          card = document.createElement('div');
-          card.setAttribute('data-sid', sid);
-          card.setAttribute('data-hash', h);
-          const collapsed = isCollapsed(sid) ? ' collapsed' : '';
-          card.className = 'session-card state-' + state + collapsed;
-          card.style.cssText = '--sh:' + hue + (mgHidden ? ';display:none' : '');
+  let prevNode = null;
+  sessions.forEach(s => {
+    const sid = s.session_id;
+    const state = s.state || 'busy';
+    const hue = sessionHue(sid);
+    const h = cardHash(s);
+    let card = existingMap[sid];
+    if (card) {
+      const collapsed = isCollapsed(sid) ? ' collapsed' : '';
+      card.className = 'session-card state-' + state + collapsed;
+      card.style.cssText = '--sh:' + hue;
+      const prev = card.getAttribute('data-hash');
+      if (prev !== h) {
+        const focused = document.activeElement;
+        if (!(focused && focused.id === 'dashPrompt-' + sid)) {
           card.innerHTML = buildCardHTML(s);
+          card.setAttribute('data-hash', h);
         }
-        posAfter(card);
-      });
-    });
-
-    // Remove any trailing orphaned elements
-    while (prevNode && prevNode.nextElementSibling) {
-      prevNode.nextElementSibling.remove();
+      }
+    } else {
+      card = document.createElement('div');
+      card.setAttribute('data-sid', sid);
+      card.setAttribute('data-hash', h);
+      const collapsed = isCollapsed(sid) ? ' collapsed' : '';
+      card.className = 'session-card state-' + state + collapsed;
+      card.style.cssText = '--sh:' + hue;
+      card.innerHTML = buildCardHTML(s);
+      el.appendChild(card);
     }
-  }
+    if (prevNode) {
+      if (card.previousElementSibling !== prevNode) {
+        prevNode.after(card);
+      }
+    } else {
+      if (card !== el.firstElementChild) {
+        el.prepend(card);
+      }
+    }
+    prevNode = card;
+  });
 
   lastDashboardHash = sessions.map(s => s.session_id + ':' + cardHash(s)).join('|');
 }
@@ -1127,7 +925,7 @@ function openSession(sid) {
   document.getElementById('backBtn').style.display = 'flex';
   document.getElementById('scrollBottomBtn').style.display = 'flex';
   document.getElementById('collapseAllBtn').style.display = 'none';
-  document.getElementById('pageTitle').textContent = ((federationLocalName && federationLocalName !== 'local') ? federationLocalName + ' — ' : '') + 'Session ' + sid;
+  document.getElementById('pageTitle').textContent = titlePrefix() + 'Session ' + sid;
   document.getElementById('transcriptView').innerHTML = '';
   document.getElementById('permCards').innerHTML = '';
   lastPermCardId = '';
@@ -1145,7 +943,7 @@ function showDashboard() {
   document.getElementById('backBtn').style.display = 'none';
   document.getElementById('scrollBottomBtn').style.display = 'none';
   document.getElementById('collapseAllBtn').style.display = 'flex';
-  document.getElementById('pageTitle').textContent = (federationLocalName && federationLocalName !== 'local') ? federationLocalName + ' — Claude Sessions' : 'Claude Sessions';
+  document.getElementById('pageTitle').textContent = titlePrefix() + 'Claude Sessions';
   document.getElementById('pageTitle').style.color = '#a78bfa';
   stopDetailPolling();
   lastDashboardHash = '';
@@ -1177,7 +975,7 @@ async function fetchSessionDetail() {
     const titleEl = document.getElementById('pageTitle');
     const stateColor = {idle: '#4ade80', busy: '#facc15', permission_prompt: '#f87171', elicitation: '#60a5fa', plan_review: '#c084fc'}[state] || '#a78bfa';
     const stateWord = {idle: 'Idle', busy: 'Busy', permission_prompt: 'Ask', elicitation: 'Ask', plan_review: 'Plan'}[state] || '';
-    titleEl.textContent = ((federationLocalName && federationLocalName !== 'local') ? federationLocalName + ' — ' : '') + currentSessionId + ' ' + stateWord;
+    titleEl.textContent = titlePrefix() + currentSessionId + ' ' + stateWord;
     titleEl.style.color = stateColor;
 
     // Render permission card if applicable
@@ -1748,249 +1546,10 @@ document.getElementById('promptInput').addEventListener('paste', function(e) {
   }
 })();
 
-// ── Machines button visibility ──
-function checkMachinesBtn() {
-  fetch('/api/multiview/remotes').then(r => r.json()).then(d => {
-    document.getElementById('machinesBtn').style.display = (d.remotes && d.remotes.length > 1) ? 'flex' : 'none';
-  }).catch(() => {});
-}
-checkMachinesBtn();
-setInterval(checkMachinesBtn, 30000);
-
 // ── Polling ──
 pollTimer = setInterval(() => {
   if (currentView === 'dashboard') fetchSessions();
 }, 2000);
-</script>
-</body>
-</html>"""
-
-
-# ── Machines Page ──
-MULTIVIEW_PAGE = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Machines — Claude Sessions</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    min-height: 100vh;
-  }
-
-  .mv-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 20px;
-    background: #1a1a2e;
-    border-bottom: 1px solid #2a2a4a;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .mv-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: #a78bfa;
-    text-decoration: none;
-    white-space: nowrap;
-  }
-
-  .mv-title:hover { color: #c4b5fd; }
-
-  .mv-sep {
-    width: 1px;
-    height: 20px;
-    background: #2a2a4a;
-    flex-shrink: 0;
-  }
-
-  .mv-btn {
-    background: #2a2a4a;
-    border: 1px solid #3a3a5a;
-    color: #c0c0d0;
-    font-family: inherit;
-    font-size: 12px;
-    padding: 5px 12px;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-
-  .mv-btn:hover { background: #3a3a5a; color: #fff; }
-
-  .mv-btn-openall {
-    background: #a78bfa;
-    border: 1px solid #a78bfa;
-    border-radius: 5px;
-    color: #0e0e1a;
-    cursor: pointer;
-    padding: 5px 14px;
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-
-  .mv-btn-openall:hover { background: #c4b5fd; border-color: #c4b5fd; }
-
-  .mv-spacer { flex: 1; }
-
-  .mv-count {
-    font-size: 12px;
-    color: #6a6a8a;
-  }
-
-  .mv-empty {
-    padding: 60px 20px;
-    text-align: center;
-    color: #4a4a6a;
-    font-size: 13px;
-  }
-
-  /* Cards list */
-  .mv-list {
-    padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .mv-card {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: #16162a;
-    border: 1px solid #2a2a4a;
-    border-radius: 8px;
-    padding: 12px 16px;
-    transition: border-color 0.15s;
-  }
-
-  .mv-card:hover { border-color: #3a3a5a; }
-
-  .mv-card-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: #e0e0e0;
-    min-width: 100px;
-    flex-shrink: 0;
-  }
-
-  .mv-card-url {
-    flex: 1;
-    font-size: 12px;
-    color: #6a6a8a;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
-  .mv-card-self {
-    font-size: 11px;
-    color: #4a4a6a;
-    background: #2a2a4a;
-    padding: 2px 8px;
-    border-radius: 3px;
-    flex-shrink: 0;
-  }
-
-  .mv-card-open {
-    background: #a78bfa22;
-    border: 1px solid #a78bfa55;
-    border-radius: 5px;
-    color: #a78bfa;
-    cursor: pointer;
-    padding: 5px 14px;
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    transition: all 0.15s;
-    flex-shrink: 0;
-    white-space: nowrap;
-    text-decoration: none;
-  }
-
-  .mv-card-open:hover { background: #a78bfa33; border-color: #a78bfa; }
-</style>
-</head>
-<body>
-<div class="mv-toolbar">
-  <a class="mv-title" href="/">Claude Sessions</a>
-  <span class="mv-sep"></span>
-  <span class="mv-count" id="mvCount"></span>
-  <span class="mv-spacer"></span>
-  <button class="mv-btn" onclick="refresh()">Refresh</button>
-  <button class="mv-btn-openall" onclick="openAll()">Open All</button>
-</div>
-
-<div class="mv-list" id="mvList"></div>
-
-<script>
-var listEl = document.getElementById('mvList');
-var countEl = document.getElementById('mvCount');
-var remotes = [];
-var LOCAL = location.origin;
-
-function escHtml(s) {
-  var d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-function getUrl(r) {
-  return r.url || LOCAL;
-}
-
-function render() {
-  if (remotes.length === 0) {
-    listEl.innerHTML = '<div class="mv-empty">No remotes registered. Start servers with --hub to register.</div>';
-    countEl.textContent = '';
-    return;
-  }
-  countEl.textContent = remotes.length + ' machine' + (remotes.length > 1 ? 's' : '');
-  listEl.innerHTML = '';
-  remotes.forEach(function(r) {
-    var url = getUrl(r);
-    var isSelf = !r.url;
-    var div = document.createElement('div');
-    div.className = 'mv-card';
-    div.innerHTML =
-      '<span class="mv-card-name">' + escHtml(r.name) + '</span>' +
-      '<span class="mv-card-url">' + escHtml(url) + '</span>' +
-      (isSelf ? '<span class="mv-card-self">this server</span>' : '') +
-      '<a class="mv-card-open" href="' + escHtml(url) + '" target="_blank">Open</a>';
-    listEl.appendChild(div);
-  });
-}
-
-function refresh() {
-  fetch('/api/multiview/remotes')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      remotes = data.remotes || [];
-      render();
-    })
-    .catch(function() {});
-}
-
-function openAll() {
-  remotes.forEach(function(r) {
-    window.open(getUrl(r), '_blank');
-  });
-}
-
-refresh();
-setInterval(refresh, 15000);
 </script>
 </body>
 </html>"""

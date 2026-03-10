@@ -37,16 +37,6 @@ A web UI for Claude Code that replaces default terminal prompts with a browser-b
 # Start the server (Linux/macOS/Windows)
 python3 server.py          # localhost only (default)
 python3 server.py --lan    # bind 0.0.0.0 for LAN access
-
-# Machines hub mode (central machine)
-python3 server.py --name hub
-
-# Machines remote (register with hub, manual tunnel ID)
-python3 server.py --name "GPU-A100" --tunnel-id 1c6j6jlh --hub-tunnel-id abc123
-
-# Machines remote (auto-detect tunnel ID)
-python3 server.py --name "GPU-A100" --detect-tunnel --hub-tunnel-id abc123
-
 # Development mode (auto-restart on file changes, requires entr, Linux/macOS only)
 ./dev.sh
 
@@ -149,38 +139,19 @@ Queue dir: `/tmp/claude-webui` (Linux/macOS) or `%TEMP%\claude-webui` (Windows).
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/` | Dashboard HTML |
-| GET | `/multiview` | Machines page (multi-machine link panel) |
 | GET | `/api/sessions` | All sessions with transcript-derived state |
 | GET | `/api/session/<id>/transcript` | Parsed transcript entries |
 | GET | `/api/check-auto-allow` | Check session auto-allow rules (used by hook) |
 | GET | `/api/pending` | Pending permission requests |
 | GET | `/api/image?path=` | Serve uploaded images |
-| GET | `/api/multiview/remotes` | Registered remote machines for Machines |
 | POST | `/api/session/register` | Register/update session |
 | POST | `/api/session/deregister` | Deregister session |
 | POST | `/api/respond` | Approve/deny permission |
 | POST | `/api/session-allow` | Session-level auto-allow |
 | POST | `/api/send-prompt` | Send prompt via tmux/console |
 | POST | `/api/upload-image` | Upload image |
-| POST | `/api/multiview/register` | Remote machine self-registration (heartbeat) |
 | POST | `/api/session-reset` | Clear session auto-allow rules (legacy) |
 | POST | `/api/session-end` | Remove session and clear auto-allow (legacy) |
-
-### Machines
-Machines (`/multiview`) provides a centralized page to access the same WebUI service across multiple machines. Remote servers register with a hub via heartbeat; the Machines page auto-discovers and lists all registered machines.
-
-**CLI arguments for hub registration:**
-
-| Argument | Purpose |
-|----------|---------|
-| `--hub-tunnel-id` | DevTunnels ID of the hub, registers this machine with the hub |
-| `--tunnel-id` | DevTunnels ID for this machine |
-| `--detect-tunnel` | Auto-detect this machine's devtunnel ID via `devtunnel list` |
-
-**How it works:**
-- Remote servers with `--hub-tunnel-id` send a heartbeat (`POST /api/multiview/register`) every 30 seconds with their name and public URL
-- The hub keeps an in-memory registry; entries expire after 90 seconds without heartbeat
-- The Machines page polls `GET /api/multiview/remotes` every 15 seconds and lists all machines with "Open" links (new tab)
 
 ## Writing Conventions
 - All documentation must be written in English.

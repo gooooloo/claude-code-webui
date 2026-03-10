@@ -65,7 +65,13 @@ session_auto_allow = {}
 # ── Transcript parsing ──
 
 def update_session_state(sid):
-    """Read new transcript entries incrementally and derive session state."""
+    """Read new transcript entries incrementally and derive session state.
+
+    THREADING NOTE: The read-offset → read-file → write-offset sequence below
+    is safe only because HTTPServer (without ThreadingMixIn) serialises all HTTP
+    requests on a single thread.  If the server is ever made multi-threaded,
+    this needs a per-session lock or compare-and-swap on the offset.
+    """
     with sessions_lock:
         s = sessions.get(sid)
         if not s:
@@ -78,17 +84,25 @@ def update_session_state(sid):
 
     try:
         with open(path, "rb") as f:
+            # Defend against /compact and /clear race: if the file was rewritten
+            # shorter than our offset, reset to 0 (the hook registration will
+            # also reset, but this closes the race window before it arrives).
+            f.seek(0, 2)  # seek to end
+            file_size = f.tell()
+            if offset > file_size:
+                offset = 0
+                with sessions_lock:
+                    s = sessions.get(sid)
+                    if s:
+                        s["transcript_offset"] = 0
+                        s["transcript_entries"] = []
             f.seek(offset)
             new_data = f.read()
-    except IOError as e:
-        print(f"[!] Failed to read transcript for session {sid}: {e}, retrying...")
-        time.sleep(1)
-        try:
-            with open(path, "rb") as f:
-                f.seek(offset)
-                new_data = f.read()
-        except IOError:
-            new_data = b""
+    except IOError:
+        # On Windows, mandatory file locking can cause IOError when Claude Code
+        # is writing. Skip this poll cycle; next poll will retry. Do NOT sleep
+        # here — it blocks the single-threaded HTTP server.
+        new_data = b""
 
     if new_data:
         text = new_data.decode("utf-8", errors="replace")
@@ -156,11 +170,6 @@ def _derive_state(sid, s):
         content = msg.get("content", "")
         text = ""
         if isinstance(content, str):
-            # Skip messages that are purely system-injected XML
-            stripped = content.strip()
-            if stripped.startswith("<") and not any(c in stripped for c in ["\n"] if stripped.count("<") > 3):
-                # Check if it's mostly XML — strip tags and see what's left
-                pass
             text = content
         elif isinstance(content, list):
             parts = []
@@ -247,8 +256,9 @@ def _derive_state(sid, s):
             tool_id = last_tool.get("id", "")
             if not _has_tool_result(entries, tool_id):
                 return "busy", summary, user_prompt
+            # Last tool_use is resolved — fall through to idle
 
-        if stop_reason == "end_turn" or (not tool_uses and stop_reason != "tool_use"):
+        if stop_reason == "end_turn" or not tool_uses or _all_tool_uses_resolved(entries, tool_uses):
             return "idle", summary, user_prompt
 
     # No assistant message yet — idle if no meaningful user input
@@ -267,8 +277,23 @@ def _find_pending_request(sid):
         try:
             with open(path) as f:
                 data = json.load(f)
-            if str(data.get("session_id", "")) == str(sid):
-                return data
+            if str(data.get("session_id", "")) != str(sid):
+                continue
+            # Check if the hook process that wrote this request is still alive.
+            # If it's dead (SIGKILL, OOM, etc.), atexit cleanup didn't fire and
+            # the file is orphaned — no process is waiting for the response.
+            hook_pid = data.get("pid")
+            if hook_pid:
+                try:
+                    if not is_process_alive(int(hook_pid)):
+                        try:
+                            os.remove(path)
+                        except OSError:
+                            pass
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            return data
         except (json.JSONDecodeError, IOError):
             continue
     return None
@@ -306,6 +331,13 @@ def _has_tool_result(entries, tool_id):
                 if c.get("tool_use_id") == tool_id:
                     return True
     return False
+
+
+def _all_tool_uses_resolved(entries, tool_uses):
+    """Check if all tool_use blocks have matching tool_results."""
+    if not tool_uses:
+        return True
+    return all(_has_tool_result(entries, tu.get("id", "")) for tu in tool_uses)
 
 
 def _cleanup_stale_request(request_id):

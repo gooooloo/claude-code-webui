@@ -423,8 +423,13 @@ def main():
         "session_id": session_id,
         "project_dir": project_dir,
     }
-    with open(request_file, "w") as f:
+    # Write atomically via temp file + os.replace to prevent the server
+    # from reading a half-written file.  os.replace works on both POSIX
+    # and Windows (unlike os.rename which fails on Windows if dest exists).
+    tmp_file = request_file + ".tmp"
+    with open(tmp_file, "w") as f:
         json.dump(request_data, f)
+    os.replace(tmp_file, request_file)
 
     # Poll for response
     elapsed = 0

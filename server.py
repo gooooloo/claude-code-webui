@@ -472,6 +472,11 @@ class WebUIHandler(BaseHTTPRequestHandler):
             result = []
             with sessions_lock:
                 for sid, s in sessions.items():
+                    # Determine if this session can receive prompts
+                    if IS_WINDOWS:
+                        can_prompt = bool(s.get("console_pid"))
+                    else:
+                        can_prompt = bool(s.get("tmux_pane"))
                     entry = {
                         "session_id": sid,
                         "cwd": s["cwd"],
@@ -480,6 +485,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
                         "last_user_prompt": s["last_user_prompt"],
                         "last_activity": s["last_activity"],
                         "registered_at": s["registered_at"],
+                        "prompt_capable": can_prompt,
                     }
                     # Attach pending request if in permission_prompt state
                     if s["derived_state"] == "permission_prompt":
@@ -754,6 +760,14 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 s = sessions.get(sid)
             if not s:
                 self.send_error(404, "Session not found")
+                return
+
+            # Check session state before delivery to avoid pasting into busy terminal
+            update_session_state(sid)
+            with sessions_lock:
+                state = sessions[sid]["derived_state"] if sid in sessions else "unknown"
+            if state not in ("idle", "elicitation", "plan_review"):
+                self.send_error(409, f"Session is {state}, not idle")
                 return
 
             if send_prompt(s, prompt):

@@ -8,7 +8,8 @@ and writing keyboard input records via WriteConsoleInputW.
 This runs as a separate subprocess to avoid disrupting the server's
 own console. On Linux/macOS this file is unused (tmux is used instead).
 
-Usage: python win_send_keys.py <target_pid> <text>
+Usage: python win_send_keys.py <target_pid>
+       Text is read from stdin (UTF-8) to avoid command line length limits.
 """
 
 import ctypes
@@ -62,16 +63,22 @@ def send_keys(target_pid, text):
                 ("Event", INPUT_RECORD_Event),
             ]
 
+        VK_RETURN = 0x0D
+
         # Build input records: key down + key up for each character
-        full_text = text + "\r"  # Add Enter
+        # Convert \n to \r so multi-line prompts work correctly on Windows consoles
+        full_text = text.replace("\n", "\r") + "\r"  # Add Enter
         records = []
         for ch in full_text:
+            # Set VK_RETURN for \r so apps checking virtual key codes detect Enter
+            vk = VK_RETURN if ch == "\r" else 0
+
             # Key down
             rec_down = INPUT_RECORD()
             rec_down.EventType = KEY_EVENT
             rec_down.Event.KeyEvent.bKeyDown = True
             rec_down.Event.KeyEvent.wRepeatCount = 1
-            rec_down.Event.KeyEvent.wVirtualKeyCode = 0
+            rec_down.Event.KeyEvent.wVirtualKeyCode = vk
             rec_down.Event.KeyEvent.wVirtualScanCode = 0
             rec_down.Event.KeyEvent.uChar = ch
             rec_down.Event.KeyEvent.dwControlKeyState = 0
@@ -82,7 +89,7 @@ def send_keys(target_pid, text):
             rec_up.EventType = KEY_EVENT
             rec_up.Event.KeyEvent.bKeyDown = False
             rec_up.Event.KeyEvent.wRepeatCount = 1
-            rec_up.Event.KeyEvent.wVirtualKeyCode = 0
+            rec_up.Event.KeyEvent.wVirtualKeyCode = vk
             rec_up.Event.KeyEvent.wVirtualScanCode = 0
             rec_up.Event.KeyEvent.uChar = ch
             rec_up.Event.KeyEvent.dwControlKeyState = 0
@@ -108,12 +115,14 @@ def send_keys(target_pid, text):
 
 
 def main():
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <target_pid> <text>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <target_pid>", file=sys.stderr)
+        print("Text is read from stdin.", file=sys.stderr)
         sys.exit(1)
 
     target_pid = int(sys.argv[1])
-    text = sys.argv[2]
+    # Read text from stdin to avoid command line length limits and encoding issues
+    text = sys.stdin.buffer.read().decode("utf-8")
 
     if send_keys(target_pid, text):
         sys.exit(0)

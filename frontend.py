@@ -879,7 +879,7 @@ function buildCardHTML(s) {
     html += ' <button class="btn-deny-sm" onclick="respond(\\'' + esc(pr.id) + '\\',\\'deny\\',this)">Deny</button>';
     html += '</div>';
   }
-  if (state === 'idle') {
+  if (state === 'idle' && s.prompt_capable !== false) {
     html += '<div class="sc-prompt-row" onclick="event.stopPropagation()">';
     html += '<input class="sc-prompt-input" id="dashPrompt-' + esc(s.session_id) + '" placeholder="Send a prompt..." onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\\'Enter\\'){event.preventDefault();sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')}">';
     html += '<button class="sc-prompt-send" onclick="sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')">Send</button>';
@@ -1042,6 +1042,10 @@ async function fetchSessionDetail() {
     const stateWord = {idle: 'Idle', busy: 'Busy', permission_prompt: 'Ask', elicitation: 'Ask', plan_review: 'Plan'}[state] || '';
     titleEl.textContent = titlePrefix() + currentSessionId + ' ' + stateWord;
     titleEl.style.color = stateColor;
+
+    // Hide prompt area if session cannot receive prompts
+    const promptArea = document.getElementById('promptArea');
+    if (promptArea) promptArea.style.display = session.prompt_capable === false ? 'none' : '';
 
     // Render permission card if applicable
     renderPermCards(session);
@@ -1439,11 +1443,12 @@ function exportSelectedHTML() {
   exitMultiSelect();
 }
 
-function showToast(msg) {
+function showToast(msg, isError) {
   const el = document.getElementById('toast');
   el.textContent = msg;
+  el.style.background = isError ? '#ef4444' : '#333';
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2000);
+  setTimeout(() => el.classList.remove('show'), isError ? 4000 : 2000);
 }
 
 // ── Actions ──
@@ -1621,13 +1626,17 @@ async function sendPrompt() {
   imagePaths = [];
   document.getElementById('imagePreview').innerHTML = '';
   try {
-    await fetch('/api/send-prompt', {
+    const res = await fetch('/api/send-prompt', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({session_id: currentSessionId, prompt})
     });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => 'Unknown error');
+      showToast('Failed to send prompt: ' + msg, true);
+    }
   } catch (e) {
-    console.error('Failed to send prompt:', e);
+    showToast('Failed to send prompt: network error', true);
   }
 }
 
@@ -1639,12 +1648,18 @@ function autoResize(el) {
 async function quickPrompt(prompt) {
   if (!currentSessionId) return;
   try {
-    await fetch('/api/send-prompt', {
+    const res = await fetch('/api/send-prompt', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({session_id: currentSessionId, prompt})
     });
-  } catch (e) {}
+    if (!res.ok) {
+      const msg = await res.text().catch(() => 'Unknown error');
+      showToast('Failed to send prompt: ' + msg, true);
+    }
+  } catch (e) {
+    showToast('Failed to send prompt: network error', true);
+  }
 }
 
 function insertAtCursor(inputId, text) {
@@ -1665,13 +1680,17 @@ async function sendDashboardPrompt(sessionId) {
   input.value = '';
   touchSession(sessionId);
   try {
-    await fetch('/api/send-prompt', {
+    const res = await fetch('/api/send-prompt', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({session_id: sessionId, prompt})
     });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => 'Unknown error');
+      showToast('Failed to send prompt: ' + msg, true);
+    }
   } catch (e) {
-    console.error('Failed to send prompt:', e);
+    showToast('Failed to send prompt: network error', true);
   }
 }
 

@@ -46,6 +46,11 @@ await fetch('/api/send-prompt', {
 
 If the server returns 500 ("Failed to send prompt"), the error is only logged to `console.error`. The user sees no indication that the prompt was not delivered.
 
+There are actually **three** call sites with this issue:
+- `sendPrompt()` (frontend.py:1623–1631) — logs to `console.error`
+- `quickPrompt()` (frontend.py:1641–1647) — **empty catch block** `catch (e) {}`
+- `sendDashboardPrompt()` (frontend.py:1667–1675) — logs to `console.error`
+
 **Impact:** Every delivery failure on the backend is invisible to the user. This is the #1 reason users think "it sent but nothing happened".
 
 ### P2. Server does not verify session state before delivery
@@ -245,10 +250,20 @@ If `AttachConsole` blocks or `WriteConsoleInputW` hangs, the entire HTTP handler
 
 ## Suggested Fix Priority
 
-1. **P1 + T1**: Frontend error display + tmux return code checking — makes failures visible instead of silent
-2. **W1**: Write records in chunks with flow control, or verify `written == len(records)` and retry/report
-3. **W2**: Disable prompt input in UI for sessions without delivery capability
-4. **W6**: Set `wVirtualKeyCode = VK_RETURN` for `\r` character
-5. **W5**: Convert `\n` to `\r` in the prompt before building key events
-6. **T2**: Use named tmux buffers to avoid global buffer race
-7. **P2**: Server-side state check before delivery (return 409 if not idle)
+1. ~~**P1 + T1**: Frontend error display + tmux return code checking~~ — **FIXED**
+2. **W1**: Write records in chunks with flow control, or verify `written == len(records)` and retry/report — needs Windows testing
+3. ~~**W2**: Disable prompt input in UI for sessions without delivery capability~~ — **FIXED**
+4. ~~**W6**: Set `wVirtualKeyCode = VK_RETURN` for `\r` character~~ — **FIXED** (needs Windows testing)
+5. ~~**W5**: Convert `\n` to `\r` in the prompt before building key events~~ — **FIXED** (needs Windows testing)
+6. ~~**T2**: Use named tmux buffers to avoid global buffer race~~ — **FIXED**
+7. ~~**P2**: Server-side state check before delivery (return 409 if not idle)~~ — **FIXED**
+
+### Additional fixes applied
+- ~~**W4**: Prompt passed via stdin instead of command line argument~~ — **FIXED** (needs Windows testing)
+- **P1** expanded to cover all three `send-prompt` call sites (`sendPrompt`, `quickPrompt`, `sendDashboardPrompt`)
+- `showToast` now supports error styling (red background, longer display)
+
+### Remaining (not fixed)
+- **W1**: Console input buffer overflow — needs Windows testing to validate chunked write approach
+- **W3**: AttachConsole mutual exclusion — low frequency, fix requires cross-process locking
+- **W7**: 10-second subprocess timeout — architectural (single-threaded HTTPServer), low frequency

@@ -322,8 +322,8 @@ def _send_prompt_windows(console_pid, text):
     try:
         result = subprocess.run(
             [sys.executable, os.path.join(os.path.dirname(__file__), "win_send_keys.py"),
-             str(console_pid), text],
-            capture_output=True, timeout=10
+             str(console_pid)],
+            input=text.encode("utf-8"), capture_output=True, timeout=10
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -343,21 +343,28 @@ def _send_prompt_tmux(session_info, prompt):
         cmd_base = ["tmux", "-S", socket_path]
 
     try:
-        # Load prompt into buffer via stdin
-        subprocess.run(
-            cmd_base + ["load-buffer", "-"],
+        # Use a named buffer to avoid global buffer race (T2)
+        buf_name = f"webui-{os.getpid()}"
+
+        # Load prompt into named buffer via stdin
+        r = subprocess.run(
+            cmd_base + ["load-buffer", "-b", buf_name, "-"],
             input=prompt.encode(), capture_output=True, timeout=5
         )
+        if r.returncode != 0:
+            return False
         # Paste buffer into target pane
-        subprocess.run(
-            cmd_base + ["paste-buffer", "-t", pane, "-d"],
+        r = subprocess.run(
+            cmd_base + ["paste-buffer", "-b", buf_name, "-t", pane, "-d"],
             capture_output=True, timeout=5
         )
+        if r.returncode != 0:
+            return False
         # Send Enter
-        subprocess.run(
+        r = subprocess.run(
             cmd_base + ["send-keys", "-t", pane, "Enter"],
             capture_output=True, timeout=5
         )
-        return True
+        return r.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False

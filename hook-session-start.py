@@ -37,6 +37,13 @@ def find_transcript_path():
 
 
 def main():
+    # On Windows, Ctrl-C sends CTRL_C_EVENT to ALL processes in the console,
+    # including this hook subprocess.  Ignore it so we survive long enough to
+    # complete the registration POST.
+    import signal
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     try:
         input_data = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):

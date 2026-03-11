@@ -429,7 +429,7 @@ def _is_session_alive(sid, session_data):
 
 
 def zombie_cleanup_loop():
-    """Background thread: remove dead sessions every 30s."""
+    """Background thread: remove dead sessions and discover new ones every 30s."""
     while True:
         time.sleep(30)
         dead = []
@@ -445,6 +445,16 @@ def zombie_cleanup_loop():
                     del session_auto_allow[k]
         if dead:
             print(f"[~] Cleaned up {len(dead)} zombie session(s): {dead}")
+
+        # On Windows, periodically scan for new sessions from transcript files.
+        # This is the fallback for when the SessionStart hook fails to register
+        # (e.g., Ctrl-C sends CTRL_C_EVENT to all console processes including
+        # the hook subprocess, killing it before the POST completes).
+        if IS_WINDOWS:
+            try:
+                _scan_sessions_from_transcripts()
+            except Exception:
+                pass
 
 
 

@@ -335,6 +335,14 @@ def check_smart_auto_approve(tool_name, tool_input, project_dir):
 
 
 def main():
+    # On Windows, Ctrl-C sends CTRL_C_EVENT to ALL processes in the console,
+    # including this hook subprocess.  Ignore it so we don't die mid-request
+    # (which would leave orphaned .request.json files and drop the permission
+    # response — the atexit cleanup handles graceful shutdown instead).
+    import signal
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     os.makedirs(QUEUE_DIR, exist_ok=True)
 
     # Read input

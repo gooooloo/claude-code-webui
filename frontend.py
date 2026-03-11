@@ -1629,6 +1629,8 @@ async function respond(id, decision, btn, message) {
       body: JSON.stringify(body)
     });
     respondedIds.add(id);
+    if (currentView === 'dashboard') fetchSessions();
+    else fetchSessionDetail();
   } catch (e) {
     if (btn) btn.textContent = 'Error';
   }
@@ -1650,6 +1652,8 @@ async function respondAlwaysAll(reqId, btn) {
       body: JSON.stringify({id: reqId, decision: 'always', allow_patterns: patterns})
     });
     respondedIds.add(reqId);
+    if (currentView === 'dashboard') fetchSessions();
+    else fetchSessionDetail();
   } catch (e) {
     btn.textContent = 'Error';
   }
@@ -1666,6 +1670,8 @@ async function respondSessionAllow(id, sessionId, toolName, btn) {
       body: JSON.stringify({id, session_id: sessionId, tool_name: toolName})
     });
     respondedIds.add(id);
+    if (currentView === 'dashboard') fetchSessions();
+    else fetchSessionDetail();
   } catch (e) {
     btn.textContent = 'Error';
   }
@@ -1788,6 +1794,9 @@ async function sendPrompt() {
     if (!res.ok) {
       const msg = await res.text().catch(() => 'Unknown error');
       showToast('Failed to send prompt: ' + msg, true);
+    } else {
+      scrollToBottomOnNextRender = true;
+      fetchSessionDetail();
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);
@@ -1810,6 +1819,9 @@ async function quickPrompt(prompt) {
     if (!res.ok) {
       const msg = await res.text().catch(() => 'Unknown error');
       showToast('Failed to send prompt: ' + msg, true);
+    } else {
+      scrollToBottomOnNextRender = true;
+      fetchSessionDetail();
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);
@@ -1842,6 +1854,8 @@ async function sendDashboardPrompt(sessionId) {
     if (!res.ok) {
       const msg = await res.text().catch(() => 'Unknown error');
       showToast('Failed to send prompt: ' + msg, true);
+    } else {
+      fetchSessions();
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);

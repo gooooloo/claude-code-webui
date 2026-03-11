@@ -155,3 +155,6 @@ Queue dir: `/tmp/claude-webui` (Linux/macOS) or `%TEMP%\claude-webui` (Windows).
 
 ## Writing Conventions
 - All documentation must be written in English.
+
+## Development Rules
+- **UI changes require Playwright verification**: Any change to `frontend.py` or other UI-related code must be verified using Playwright (via MCP) before considering the task complete. Start the server (`python3 server.py`), navigate to the relevant page, and visually confirm the change works as expected. Take a screenshot to show the result.

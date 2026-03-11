@@ -1523,7 +1523,7 @@ function renderSelectedToPNGCanvas(callback) {
     return '<div class="msg ' + item.cls + '"><div class="msg-label">' + esc(item.label) + '</div><div class="msg-content">' + item.html + '</div></div>';
   }).filter(Boolean);
   const container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:#1a1a2e;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;color:#e0e0e0;z-index:-1;';
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:800px;background:#1a1a2e;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;color:#e0e0e0;z-index:-1;';
   const style = document.createElement('style');
   style.textContent =
     '.png-export .msg { margin-bottom:12px;padding:12px 16px;border-radius:10px;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word; }' +

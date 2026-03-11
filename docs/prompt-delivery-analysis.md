@@ -126,28 +126,13 @@ Some shell configurations enable bracket paste mode. When tmux `paste-buffer` is
 
 ## Windows Issues (WriteConsoleInputW)
 
-### W1. Console input buffer overflow silently truncates long prompts
+### W1. ~~Console input buffer overflow silently truncates long prompts~~ — NOT A REAL ISSUE
 
-**Location:** win_send_keys.py:66–103
+**Original claim:** The console input buffer has a fixed ~512-record capacity, causing long prompts to be silently truncated.
 
-```python
-full_text = text + "\r"          # e.g., 500 chars → 501 chars
-records = []                     # → 1002 INPUT_RECORDs (key_down + key_up per char)
-# ... build records ...
-success = kernel32.WriteConsoleInputW(handle, arr, len(records), ctypes.byref(written))
-return written.value > 0         # ← only checks that at least 1 record was written!
-```
+**Debunked:** Per the [Microsoft Terminal source code](https://github.com/microsoft/terminal/blob/main/src/host/inputBuffer.hpp), the console input buffer is a `std::deque<INPUT_RECORD>` that **grows dynamically**. There is no fixed capacity limit. The official [WriteConsoleInput docs](https://learn.microsoft.com/en-us/windows/console/writeconsoleinput) state: *"The input buffer grows dynamically, if necessary, to hold as many events as are written."*
 
-The Windows console input buffer has a finite capacity. If the buffer can only accept N records out of M total:
-- `success` is True (the call itself succeeded)
-- `written.value = N` (partial write)
-- The function returns `True` (N > 0)
-
-The `\r` (Enter) is the **last** record in the array. If the buffer is too full to accept all records, the Enter is never written. The user sees: partial text appears in the terminal, but no Enter, so Claude Code never processes it.
-
-For a 500-character prompt, that's 1002 records. If the buffer only holds 512 records (a common default), only the first 256 characters are written, and Enter is dropped.
-
-**Impact:** High — this is very likely the most common Windows failure mode. Any prompt longer than ~256 characters is at risk.
+**Impact:** None — this issue does not exist.
 
 ### W2. Auto-discovered sessions cannot receive prompts
 
@@ -230,6 +215,25 @@ If `AttachConsole` blocks or `WriteConsoleInputW` hangs, the entire HTTP handler
 
 **Impact:** Low — the subprocess rarely hangs, but when it does, the entire UI freezes.
 
+### W8. `GetStdHandle` returns invalid handle after `FreeConsole` + `AttachConsole`
+
+**Location:** win_send_keys.py:34–39 (before fix)
+
+```python
+kernel32.FreeConsole()
+kernel32.AttachConsole(target_pid)
+# ...
+handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)  # ← STALE HANDLE!
+```
+
+After `FreeConsole()`, the cached standard handles (stdin/stdout/stderr) become invalid. `AttachConsole()` attaches the process to the target's console but does **not** update these cached handles. `GetStdHandle(STD_INPUT_HANDLE)` returns the old, now-invalid handle.
+
+**Verified on Windows 11:** `GetStdHandle` returns a non-null handle that fails every subsequent call with `ERROR_INVALID_HANDLE` (error 6). The original code used `ctypes.windll.kernel32` without `use_last_error=True`, so `ctypes.get_last_error()` always returned 0, masking the real error. Every `WriteConsoleInputW` call silently failed — zero records written, but `success` appeared truthy due to the error masking.
+
+**Fix:** Replace `GetStdHandle(STD_INPUT_HANDLE)` with `CreateFileW("CONIN$", GENERIC_READ|GENERIC_WRITE, ...)`, which opens a fresh handle to the attached console's input buffer. Also use `ctypes.WinDLL("kernel32", use_last_error=True)` for accurate error codes.
+
+**Impact:** Critical — this was the **root cause** of all prompt delivery failures on Windows. Every prompt send via WebUI silently failed.
+
 ---
 
 ## Summary
@@ -240,30 +244,32 @@ If `AttachConsole` blocks or `WriteConsoleInputW` hangs, the entire HTTP handler
 | **P2** | Server doesn't check session state before send | All | Prompt pasted into busy terminal | Medium |
 | **T1** | Tmux commands don't check return codes | Linux/macOS | Silent prompt loss, reported as success | Medium |
 | **T2** | Tmux buffer global race | Linux/macOS | Wrong prompt delivered to wrong pane | Low |
-| **W1** | Console input buffer overflow | Windows | Long prompts truncated, Enter dropped | High |
+| ~~**W1**~~ | ~~Console input buffer overflow~~ | ~~Windows~~ | ~~Long prompts truncated~~ | **Not real** |
 | **W2** | Auto-discovered sessions lack console_pid | Windows | Send always fails silently | High |
 | **W3** | AttachConsole mutual exclusion | Windows | Concurrent send fails | Low |
 | **W4** | Prompt via command line argument | Windows | Length limit, encoding risk | Low |
 | **W5** | `\n` not treated as Enter | Windows | Multi-line prompt format corrupted | Medium |
 | **W6** | `wVirtualKeyCode = 0` for Enter | Windows | Enter key potentially ignored | Unknown |
 | **W7** | 10-second subprocess timeout | Windows | UI freezes | Low |
+| **W8** | `GetStdHandle` invalid after `FreeConsole`+`AttachConsole` | Windows | **All prompts silently fail** | **Every send** |
 
 ## Suggested Fix Priority
 
-1. ~~**P1 + T1**: Frontend error display + tmux return code checking~~ — **FIXED**
-2. **W1**: Write records in chunks with flow control, or verify `written == len(records)` and retry/report — needs Windows testing
+1. ~~**W8**: `GetStdHandle` invalid after `FreeConsole`+`AttachConsole` — use `CreateFileW("CONIN$")` instead~~ — **FIXED** (verified on Windows 11)
+2. ~~**P1 + T1**: Frontend error display + tmux return code checking~~ — **FIXED**
 3. ~~**W2**: Disable prompt input in UI for sessions without delivery capability~~ — **FIXED**
-4. ~~**W6**: Set `wVirtualKeyCode = VK_RETURN` for `\r` character~~ — **FIXED** (needs Windows testing)
-5. ~~**W5**: Convert `\n` to `\r` in the prompt before building key events~~ — **FIXED** (needs Windows testing)
+4. ~~**W6**: Set `wVirtualKeyCode = VK_RETURN` for `\r` character~~ — **FIXED** (verified on Windows 11)
+5. ~~**W5**: Convert `\n` to `\r` in the prompt before building key events~~ — **FIXED** (verified on Windows 11)
 6. ~~**T2**: Use named tmux buffers to avoid global buffer race~~ — **FIXED**
 7. ~~**P2**: Server-side state check before delivery (return 409 if not idle)~~ — **FIXED**
 
 ### Additional fixes applied
-- ~~**W4**: Prompt passed via stdin instead of command line argument~~ — **FIXED** (needs Windows testing)
+- ~~**W4**: Prompt passed via stdin instead of command line argument~~ — **FIXED** (verified on Windows 11)
+- ~~**W1**: Console input buffer overflow~~ — **debunked** (buffer grows dynamically per Microsoft Terminal source)
 - **P1** expanded to cover all three `send-prompt` call sites (`sendPrompt`, `quickPrompt`, `sendDashboardPrompt`)
 - `showToast` now supports error styling (red background, longer display)
+- `ctypes.WinDLL("kernel32", use_last_error=True)` for accurate Win32 error codes
 
 ### Remaining (not fixed)
-- **W1**: Console input buffer overflow — needs Windows testing to validate chunked write approach
 - **W3**: AttachConsole mutual exclusion — low frequency, fix requires cross-process locking
 - **W7**: 10-second subprocess timeout — architectural (single-threaded HTTPServer), low frequency

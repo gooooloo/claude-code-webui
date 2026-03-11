@@ -384,10 +384,11 @@ except IOError as e:
 
 **Windows-specific issues:**
 
-- **`FreeConsole` + `AttachConsole` in a subprocess**: The server spawns `win_send_keys.py` as a child process. This child detaches from the server's console (`FreeConsole`) and attaches to the target (`AttachConsole`). If the target console is already being used by another `AttachConsole` call (from a concurrent prompt send), one of them will fail — `AttachConsole` only allows one external attachment at a time.
-- **Character-by-character injection**: Each character generates a key-down + key-up `INPUT_RECORD` pair. For a 1000-character prompt, that's 2000+ input records. `WriteConsoleInputW` writes them all at once (line 94), but the target console's input buffer has a limited size. If the buffer is full, excess records may be dropped silently. There's no flow control.
-- **No escape handling**: Special characters (e.g., `\t`, `\r`, control characters) are injected literally. If the prompt contains tab characters, they'll be interpreted as tab-completion by the shell, not as literal tabs. The tmux approach (`load-buffer`) doesn't have this issue because `paste-buffer` sends raw text.
-- **`\r` vs `\n` for Enter**: Line 66: `full_text = text + "\r"`. Windows consoles expect `\r` (carriage return) as Enter. This is correct, but differs from the tmux path which sends a literal `Enter` keyname.
+- **`GetStdHandle` returns invalid handle after `FreeConsole` + `AttachConsole`**: This was the **root cause** of all prompt delivery failures on Windows. After `FreeConsole()`, cached standard handles become stale. `AttachConsole()` attaches to the target console but does not update these handles. `GetStdHandle(STD_INPUT_HANDLE)` returned an invalid handle, causing every `WriteConsoleInputW` call to silently fail. **Fixed:** replaced with `CreateFileW("CONIN$")` which opens a fresh handle to the attached console's input buffer.
+- **`FreeConsole` + `AttachConsole` mutual exclusion**: The server spawns `win_send_keys.py` as a child process. If the target console is already being used by another `AttachConsole` call (from a concurrent prompt send), one of them will fail — `AttachConsole` only allows one external attachment at a time.
+- **Character-by-character injection**: Each character generates a key-down + key-up `INPUT_RECORD` pair. For a 1000-character prompt, that's 2000+ input records. The console input buffer grows dynamically (per Microsoft Terminal source: `std::deque<INPUT_RECORD>`), so there is no overflow risk.
+- **No escape handling**: Special characters (e.g., `\t`, control characters) are injected literally. If the prompt contains tab characters, they'll be interpreted as tab-completion by the shell, not as literal tabs. The tmux approach (`load-buffer`) doesn't have this issue because `paste-buffer` sends raw text.
+- **`\r` vs `\n` for Enter**: `full_text = text.replace("\n", "\r") + "\r"`. Windows consoles expect `\r` (carriage return) as Enter. `\n` is converted to `\r` for multi-line prompt support.
 - **10-second timeout**: `_send_prompt_windows` (platform_utils.py:320) has a 10-second timeout. If the subprocess hangs (e.g., `AttachConsole` blocks), the server's HTTP handler is blocked for 10 seconds (single-threaded server).
 
 ### W5. Path Encoding
@@ -400,7 +401,11 @@ except IOError as e:
 
 **Issue:** The Linux auto-discovery code in `scan_existing_sessions()` (server.py:960–964) duplicates the encoding logic inline (`path.replace("/", "-")` with a leading `-`) instead of calling `encode_project_path()`. The two implementations currently produce identical results for Linux paths, but if `encode_project_path()` is ever updated (e.g., to handle edge cases), the auto-discovery path won't pick up the change. This duplication is an architectural maintenance concern.
 
-**Windows issue:** The `encode_project_path` removes the colon from `C:` but Claude Code itself may use a different encoding scheme. If they don't agree, `find_transcript_path()` in the hook (hook-session-start.py:28) won't find the right directory, and the transcript path will be empty. The hook-session-start.py has a fallback: `input_data.get("transcript_path", "") or find_transcript_path()` — if Claude Code passes the path directly in the input, the encoding doesn't matter. But on older Claude Code versions that don't pass it, the encoding must match exactly.
+**Windows issue — CONFIRMED:** The `encode_project_path` produces `-C-Users-foo-project` (removes colon, prepends `-`), but Claude Code actually produces `C--Users-foo-project` (replaces `:` with `-`, no leading `-`). Verified on Windows 11 with Claude Code v2.1.39:
+- Actual directory: `C--Users-qidlin-source-repos-claude-code-webui`
+- `encode_project_path()` output: `-C-Users-qidlin-source-repos-claude-code-webui`
+
+**Current impact is limited:** Claude Code v2.1.39+ passes `transcript_path` directly in the SessionStart hook input data, so `find_transcript_path()` (which uses `encode_project_path`) is only called as a fallback. The `_scan_sessions_from_transcripts()` auto-discovery iterates all directories and does not use `encode_project_path`, so it is also unaffected.
 
 ### W6. `.request.json` Atomicity
 
@@ -408,14 +413,7 @@ except IOError as e:
 
 **Windows:** `os.rename()` **fails** if the destination already exists (`FileExistsError`). You must use `os.replace()` instead for atomic replacement. But for new files (which `.request.json` is), `os.rename()` works — the file doesn't exist yet.
 
-**However**, the current code doesn't use rename at all — it writes directly:
-
-```python
-with open(request_file, "w") as f:
-    json.dump(request_data, f)
-```
-
-On Windows, this write may not be atomic even for small files. If the server reads the file between `open()` creating it (size 0) and `json.dump()` writing content, it gets an empty file → `JSONDecodeError` → skipped for this poll cycle. Same as Linux, but the window may be wider on Windows due to different I/O scheduling.
+**Fixed:** The hook now writes to a `.tmp` file first, then calls `os.replace()` to atomically move it into place. `os.replace()` works on both POSIX and Windows (unlike `os.rename` which fails on Windows if the destination already exists).
 
 ### W7. Process Lifecycle
 
@@ -438,10 +436,9 @@ The "End task" in Task Manager is by far the most common way Windows users kill 
 | **`/compact` race** | Can read stale/mid-file data | Can't read at all (locked) → `new_data = b""` | Both bad, but symptoms differ |
 | **Session auto-discovery** | Process-centric (tmux panes) | File-centric (transcript mtime) | Windows sessions lack `console_pid`; prompt delivery broken until hook fires |
 | **Liveness detection** | `os.kill(0)` or tmux process tree | `GetExitCodeProcess` or 2-hour mtime window | Windows has much coarser granularity for auto-discovered sessions |
-| **Prompt delivery** | tmux buffer paste (robust, no char limit) | `WriteConsoleInputW` keystroke injection | Windows has input buffer overflow risk; no tab/special-char safety |
+| **Prompt delivery** | tmux buffer paste (robust, no char limit) | `WriteConsoleInputW` keystroke injection | ~~Buffer overflow~~ debunked; `GetStdHandle` bug was root cause (**FIXED**) |
 | **Prompt delivery blocking** | 5s timeout × 3 commands | 10s timeout for subprocess | Both block the HTTP server |
-| **`.request.json` write** | Non-atomic but low risk | Non-atomic, possibly wider race window | Both should use write-then-rename |
-| **`.request.json` atomic rename** | `os.rename()` is atomic (POSIX) | `os.rename()` fails if dest exists; need `os.replace()` | Fix must use `os.replace()` for cross-platform |
+| **`.request.json` write** | Atomic via temp + `os.replace()` | Atomic via temp + `os.replace()` | **FIXED** — both platforms use write-then-replace |
 | **Orphaned request files** | From SIGKILL, OOM | From TerminateProcess, console close, Task Manager | More common on Windows (Task Manager) |
 | **Zombie cleanup accuracy** | Good (PID check or tmux process tree) | Poor for auto-discovered sessions (2-hour mtime) | Dead sessions linger much longer on Windows |
 | **Pane/console eviction** | By `tmux_pane` match | By `console_pid` match (only hook-registered) | Auto-discovered Windows sessions can't be evicted |

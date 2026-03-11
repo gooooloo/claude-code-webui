@@ -19,7 +19,7 @@ import sys
 
 def send_keys(target_pid, text):
     """Attach to target console and write text as keyboard input."""
-    kernel32 = ctypes.windll.kernel32
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
     # Detach from current console
     kernel32.FreeConsole()
@@ -31,11 +31,23 @@ def send_keys(target_pid, text):
         return False
 
     try:
-        # Get console input handle
-        STD_INPUT_HANDLE = ctypes.c_ulong(-10 & 0xFFFFFFFF)
-        handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
-        if handle == ctypes.c_void_p(-1).value:
-            print("GetStdHandle failed", file=sys.stderr)
+        # Open the attached console's input buffer directly.
+        # NOTE: GetStdHandle(STD_INPUT_HANDLE) does NOT work here — after
+        # FreeConsole + AttachConsole the cached standard handles are stale
+        # (ERROR_INVALID_HANDLE).  CreateFileW("CONIN$") returns a fresh,
+        # valid handle to the newly-attached console's input buffer.
+        GENERIC_READ_WRITE = 0x80000000 | 0x40000000
+        FILE_SHARE_READ_WRITE = 0x1 | 0x2
+        OPEN_EXISTING = 3
+        INVALID_HANDLE = ctypes.c_void_p(-1).value
+        kernel32.CreateFileW.restype = wt.HANDLE
+        handle = kernel32.CreateFileW(
+            "CONIN$", GENERIC_READ_WRITE, FILE_SHARE_READ_WRITE,
+            None, OPEN_EXISTING, 0, None,
+        )
+        if not handle or handle == INVALID_HANDLE:
+            error = ctypes.get_last_error()
+            print(f"CreateFileW(CONIN$) failed: error {error}", file=sys.stderr)
             return False
 
         KEY_EVENT = 0x0001
@@ -110,7 +122,11 @@ def send_keys(target_pid, text):
         return written.value > 0
 
     finally:
-        # Always detach from target console
+        # Close the CONIN$ handle and detach from target console
+        try:
+            kernel32.CloseHandle(handle)
+        except Exception:
+            pass
         kernel32.FreeConsole()
 
 

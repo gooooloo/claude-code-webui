@@ -375,6 +375,97 @@ def _build_permission_resolved_card(request_id, data, decision):
     }
 
 
+def _build_question_card(request_id, data):
+    """Build an interactive card for AskUserQuestion with option buttons.
+    Returns None if questions/options are missing (caller should fall back to permission card).
+    """
+    tool_input = data.get("tool_input", {})
+    questions = tool_input.get("questions", [])
+    if not questions:
+        return None
+
+    session_id = data.get("session_id", "")
+    project_dir = data.get("project_dir", "")
+
+    elements = []
+    has_buttons = False
+
+    if project_dir:
+        project_name = os.path.basename(project_dir)
+        elements.append({
+            "tag": "markdown",
+            "content": f"**Project:** {project_name}  |  **Session:** {session_id}"
+        })
+
+    for qi, q in enumerate(questions):
+        question_text = q.get("question", "")
+        options = q.get("options", [])
+        if question_text:
+            elements.append({
+                "tag": "markdown",
+                "content": f"**{question_text}**"
+            })
+        if options:
+            buttons = []
+            for oi, opt in enumerate(options):
+                label = opt.get("label", f"Option {oi + 1}")
+                desc = opt.get("description", "")
+                btn_text = f"{label} — {desc}" if desc else label
+                buttons.append({
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": _truncate(btn_text, 80)},
+                    "type": "primary" if oi == 0 else "default",
+                    "value": {
+                        "request_id": request_id,
+                        "type": "question",
+                        "question_index": qi,
+                        "option_label": label,
+                    }
+                })
+            elements.append({"tag": "action", "actions": buttons})
+            has_buttons = True
+
+    if not has_buttons:
+        return None
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "❓ AskUserQuestion"},
+            "template": _tool_color("AskUserQuestion")
+        },
+        "elements": elements
+    }
+
+
+def _build_question_resolved_card(request_id, data, chosen_label):
+    """Build a card showing a resolved question (no buttons)."""
+    tool_input = data.get("tool_input", {})
+    questions = tool_input.get("questions", [])
+
+    elements = []
+    for q in questions:
+        question_text = q.get("question", "")
+        if question_text:
+            elements.append({
+                "tag": "markdown",
+                "content": f"**{question_text}**"
+            })
+    elements.append({
+        "tag": "markdown",
+        "content": f"✅ **Answered:** {chosen_label}"
+    })
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "❓ AskUserQuestion"},
+            "template": "green"
+        },
+        "elements": elements
+    }
+
+
 def _build_session_root_card(session, subject=None, created_at=None):
     """Build the root card for a new session topic."""
     project_dir = session.get("cwd", "")
@@ -1013,11 +1104,17 @@ def _handle_card_action(data):
     if action_type == "send_prompt":
         return _handle_send_prompt_action(value)
 
-    if not request_id or not decision:
+    if not request_id:
         return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Missing data"}})
 
     if not _is_safe_id(request_id):
         return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Invalid request ID"}})
+
+    if action_type == "question":
+        return _handle_question_action(request_id, value)
+
+    if not decision:
+        return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Missing data"}})
 
     if action_type == "permission":
         return _handle_permission_action(request_id, decision, value)
@@ -1101,6 +1198,46 @@ def _handle_permission_action(request_id, decision, value):
 
     label = "Allowed" if decision in ("allow", "always") else "Denied"
     return P2CardActionTriggerResponse({"toast": {"type": "success", "content": label}})
+
+
+def _handle_question_action(request_id, value):
+    """Process a question option button click."""
+    from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
+
+    option_label = value.get("option_label", "")
+    if not option_label:
+        return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Empty answer"}})
+
+    request_file = os.path.join(QUEUE_DIR, f"{request_id}.request.json")
+    response_file = os.path.join(QUEUE_DIR, f"{request_id}.response.json")
+
+    if not os.path.exists(request_file):
+        return P2CardActionTriggerResponse({"toast": {"type": "warning", "content": "Request expired"}})
+
+    req_data = {}
+    try:
+        with open(request_file) as f:
+            req_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        pass
+
+    resp_data = {"decision": "deny", "message": f"User answered: {option_label}"}
+    try:
+        if not _write_exclusive(response_file, resp_data):
+            return P2CardActionTriggerResponse({"toast": {"type": "info", "content": "Already responded"}})
+        print(f"[feishu] Question answered: {option_label} for {request_id}")
+    except IOError as e:
+        print(f"[feishu] Failed to write response: {e}")
+        return P2CardActionTriggerResponse({"toast": {"type": "error", "content": "Write failed"}})
+
+    # Update the question card to show resolved state (no buttons)
+    with _lock:
+        mid = _request_card_ids.pop(request_id, None)
+    if mid:
+        resolved_card = _build_question_resolved_card(request_id, req_data, option_label)
+        _update_card(mid, resolved_card)
+
+    return P2CardActionTriggerResponse({"toast": {"type": "success", "content": f"Answered: {option_label}"}})
 
 
 # ── Notification loop ──
@@ -1222,7 +1359,12 @@ def _scan_once():
         if rid in notified_snapshot:
             continue
 
-        card = _build_permission_card(rid, data)
+        tool_name = data.get("tool_name", "")
+        card = None
+        if tool_name == "AskUserQuestion":
+            card = _build_question_card(rid, data)
+        if not card:
+            card = _build_permission_card(rid, data)
         req_sid = data.get("session_id", "")
 
         with _lock:

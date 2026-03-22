@@ -188,6 +188,9 @@ HTML_PAGE = """<!DOCTYPE html>
     font-size: 13px;
     font-family: inherit;
     outline: none;
+    resize: none;
+    overflow: hidden;
+    line-height: 1.4;
   }
   .sc-prompt-input:focus { border-color: #a78bfa; }
   .sc-prompt-input::placeholder { color: #555; }
@@ -945,7 +948,7 @@ function buildCardHTML(s) {
   }
   if (state === 'idle' && s.prompt_capable !== false) {
     html += '<div class="sc-prompt-row" onclick="event.stopPropagation()">';
-    html += '<input class="sc-prompt-input" id="dashPrompt-' + esc(s.session_id) + '" placeholder="Type a prompt... Ctrl+Enter to send" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\\'Enter\\'){event.preventDefault();sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')}">';
+    html += '<textarea class="sc-prompt-input" id="dashPrompt-' + esc(s.session_id) + '" placeholder="Type a prompt... Ctrl+Enter to send" rows="1" oninput="this.style.height=\\'auto\\';this.style.height=this.scrollHeight+\\'px\\'" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\\'Enter\\'){event.preventDefault();sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')}"></textarea>';
     html += '<button class="sc-prompt-send" onclick="sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')">Send</button>';
     html += '</div>';
     html += '<div class="sc-shortcut-row" onclick="event.stopPropagation()">';
@@ -1938,7 +1941,7 @@ function deleteLastWord(el) {
   el.selectionStart = el.selectionEnd = newBefore.length;
 }
 
-// Ctrl+Enter to send, Ctrl+W to delete last word
+// Ctrl+Enter to send, Ctrl+W to delete last word, Ctrl+J to insert newline
 document.getElementById('promptInput').addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
@@ -1947,6 +1950,14 @@ document.getElementById('promptInput').addEventListener('keydown', function(e) {
   if (e.ctrlKey && e.key === 'w') {
     e.preventDefault();
     deleteLastWord(this);
+    this.dispatchEvent(new Event('input'));
+  }
+  if (e.ctrlKey && e.key === 'j') {
+    e.preventDefault();
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '\\n' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 1;
     this.dispatchEvent(new Event('input'));
   }
 });
@@ -1980,11 +1991,22 @@ document.getElementById('promptInput').addEventListener('paste', function(e) {
   }
 })();
 
-// Ctrl+W to delete last word in dashboard prompt inputs (delegated)
+// Ctrl+W / Ctrl+J in dashboard prompt inputs (delegated)
 document.addEventListener('keydown', function(e) {
-  if (e.ctrlKey && e.key === 'w' && e.target.classList.contains('sc-prompt-input')) {
+  if (!e.ctrlKey || !e.target.classList.contains('sc-prompt-input')) return;
+  if (e.key === 'w') {
     e.preventDefault();
     deleteLastWord(e.target);
+  }
+  if (e.key === 'j') {
+    e.preventDefault();
+    const el = e.target;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    el.value = el.value.substring(0, start) + '\\n' + el.value.substring(end);
+    el.selectionStart = el.selectionEnd = start + 1;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
   }
 });
 

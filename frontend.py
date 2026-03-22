@@ -1816,6 +1816,7 @@ async function sendPrompt() {
     } else {
       scrollToBottomOnNextRender = true;
       fetchSessionDetail();
+      setTimeout(fetchSessionDetail, 500);
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);
@@ -1841,6 +1842,7 @@ async function quickPrompt(prompt) {
     } else {
       scrollToBottomOnNextRender = true;
       fetchSessionDetail();
+      setTimeout(fetchSessionDetail, 500);
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);
@@ -1875,6 +1877,7 @@ async function sendDashboardPrompt(sessionId) {
       showToast('Failed to send prompt: ' + msg, true);
     } else {
       fetchSessions();
+      setTimeout(fetchSessions, 500);
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);

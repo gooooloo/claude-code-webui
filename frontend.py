@@ -918,10 +918,9 @@ async function fetchSessions() {
     const res = await fetch('/api/sessions');
     const data = await res.json();
     serverName = data.name || 'local';
-    console.log('[poll] fetchSessions', (data.sessions||[]).map(s => s.session_id + ':' + s.state));
     renderDashboard(data.sessions || []);
   } catch (e) {
-    console.error('[poll] fetchSessions error', e);
+    // connection error, silently retry on next poll
   }
 }
 

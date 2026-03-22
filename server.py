@@ -25,7 +25,7 @@ import uuid
 import cgi
 
 from frontend import HTML_PAGE
-from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path, send_prompt
+from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, is_terminal_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path, send_prompt
 
 try:
     from channel_feishu import start_feishu_channel
@@ -364,22 +364,13 @@ def _is_session_alive(sid, session_data):
         pass  # Non-numeric (UUID) session ID
 
     terminal_id = session_data.get("terminal_id", "")
+    tmux_socket = session_data.get("tmux_socket", "")
 
-    if IS_WINDOWS:
-        if terminal_id:
-            try:
-                shell_pid = int(terminal_id)
-                if not is_process_alive(shell_pid):
-                    return False  # Shell died = terminal closed
-                # Shell alive — check if claude/node is among its children
-                for child in get_process_children(shell_pid):
-                    name = get_process_name(child).lower()
-                    if "claude" in name or "node" in name:
-                        return True
-                return False  # Shell alive but no claude child
-            except (ValueError, TypeError):
-                pass
-        # No terminal_id (auto-discovered session) — check transcript mtime
+    if is_terminal_alive(terminal_id, tmux_socket):
+        return True
+
+    # Fallback for sessions without terminal_id (auto-discovered on Windows)
+    if IS_WINDOWS and not terminal_id:
         transcript_path = session_data.get("transcript_path", "")
         if transcript_path:
             try:
@@ -392,45 +383,6 @@ def _is_session_alive(sid, session_data):
         registered_at = session_data.get("registered_at", 0)
         if time.time() - registered_at < 60:
             return True
-        return False
-
-    # Linux/macOS: check if the tmux pane exists and has claude in its process tree
-    tmux_socket = session_data.get("tmux_socket", "")
-    if terminal_id and tmux_socket:
-        socket_path = tmux_socket.split(",")[0]
-        try:
-            # Get the pane's shell PID
-            result = subprocess.run(
-                ["tmux", "-S", socket_path, "list-panes", "-a",
-                 "-F", "#{pane_id} #{pane_pid}"],
-                capture_output=True, text=True, timeout=3
-            )
-            shell_pid = None
-            for line in result.stdout.strip().splitlines():
-                parts = line.split(" ", 1)
-                if len(parts) == 2 and parts[0] == terminal_id:
-                    shell_pid = parts[1]
-                    break
-            if not shell_pid:
-                return False
-            # Check if any child of the shell is claude/node
-            children = subprocess.run(
-                ["pgrep", "-P", shell_pid],
-                capture_output=True, text=True, timeout=3
-            )
-            for child_pid in children.stdout.strip().splitlines():
-                child_pid = child_pid.strip()
-                if not child_pid:
-                    continue
-                ps_result = subprocess.run(
-                    ["ps", "-p", child_pid, "-o", "comm="],
-                    capture_output=True, text=True, timeout=3
-                )
-                comm = os.path.basename(ps_result.stdout.strip())
-                if comm in ("claude", "node"):
-                    return True
-        except Exception:
-            pass
 
     return False
 

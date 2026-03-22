@@ -366,6 +366,76 @@ def _get_process_name_windows(pid):
     return ""
 
 
+# ── Terminal alive check ──
+
+def is_terminal_alive(terminal_id, tmux_socket=""):
+    """Check if a terminal has a running claude/node process.
+
+    On Linux/macOS, queries tmux to resolve pane ID to shell PID, then checks children.
+    On Windows, terminal_id is the shell PID directly.
+    Returns True if claude/node is found, False otherwise.
+    """
+    if not terminal_id:
+        return False
+    if IS_WINDOWS:
+        return _is_terminal_alive_windows(terminal_id)
+    return _is_terminal_alive_tmux(terminal_id, tmux_socket)
+
+
+def _is_terminal_alive_windows(terminal_id):
+    """Check if shell PID is alive and has a claude/node child."""
+    try:
+        shell_pid = int(terminal_id)
+    except (ValueError, TypeError):
+        return False
+    if not is_process_alive(shell_pid):
+        return False
+    for child in get_process_children(shell_pid):
+        name = get_process_name(child).lower()
+        if "claude" in name or "node" in name:
+            return True
+    return False
+
+
+def _is_terminal_alive_tmux(terminal_id, tmux_socket):
+    """Check if tmux pane exists and has a claude/node child."""
+    if not tmux_socket:
+        return False
+    socket_path = tmux_socket.split(",")[0]
+    try:
+        result = subprocess.run(
+            ["tmux", "-S", socket_path, "list-panes", "-a",
+             "-F", "#{pane_id} #{pane_pid}"],
+            capture_output=True, text=True, timeout=3
+        )
+        shell_pid = None
+        for line in result.stdout.strip().splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2 and parts[0] == terminal_id:
+                shell_pid = parts[1]
+                break
+        if not shell_pid:
+            return False
+        children = subprocess.run(
+            ["pgrep", "-P", shell_pid],
+            capture_output=True, text=True, timeout=3
+        )
+        for child_pid in children.stdout.strip().splitlines():
+            child_pid = child_pid.strip()
+            if not child_pid:
+                continue
+            ps_result = subprocess.run(
+                ["ps", "-p", child_pid, "-o", "comm="],
+                capture_output=True, text=True, timeout=3
+            )
+            comm = os.path.basename(ps_result.stdout.strip())
+            if comm in ("claude", "node"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 # ── Prompt delivery ──
 
 def send_prompt(session_info, prompt_text):

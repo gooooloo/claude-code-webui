@@ -15,7 +15,7 @@ import sys
 import glob
 import urllib.request
 
-from platform_utils import get_queue_dir, find_claude_pid, IS_WINDOWS, encode_project_path
+from platform_utils import get_queue_dir, find_claude_pid, find_shell_pid, IS_WINDOWS, encode_project_path
 
 SERVER = "http://127.0.0.1:19836"
 QUEUE_DIR = get_queue_dir()
@@ -68,10 +68,9 @@ def main():
     }
 
     if IS_WINDOWS:
-        # On Windows there's no tmux; pass the console host PID instead
-        body_dict["console_pid"] = find_claude_pid()
+        body_dict["terminal_id"] = str(find_shell_pid())
     else:
-        body_dict["tmux_pane"] = os.environ.get("TMUX_PANE", "")
+        body_dict["terminal_id"] = os.environ.get("TMUX_PANE", "")
         body_dict["tmux_socket"] = os.environ.get("TMUX", "")
 
     body = json.dumps(body_dict).encode()

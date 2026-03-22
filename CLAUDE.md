@@ -20,7 +20,7 @@ A web UI for Claude Code that replaces default terminal prompts with a browser-b
 - **server.py** — Python HTTP server (port 19836). Session registry, transcript incremental parser, multi-session dashboard UI, API endpoints. Background thread for zombie session cleanup. Stores volatile session-level auto-allow rules in memory (queried by hook via API).
 - **frontend.py** — Extracted HTML/CSS/JS for the dashboard UI. Imported by server.py.
 - **hook-permission-request.py** — `PermissionRequest` hook. All auto-allow decision logic is centralized here (persistent rules, smart rules, session rules via server API query). Falls back to auto-allow if server is offline. If nothing matches, queues a request JSON and polls for response.
-- **hook-session-start.py** — `SessionStart` hook. Discovers transcript path, POSTs to `/api/session/register` with tmux pane/socket (Linux) or console_pid (Windows), cwd, and source.
+- **hook-session-start.py** — `SessionStart` hook. Discovers transcript path, POSTs to `/api/session/register` with `terminal_id` (tmux pane ID on Linux, shell PID on Windows), `tmux_socket` (Linux only), cwd, and source.
 - **hook-session-end.py** — `SessionEnd` hook. POSTs to `/api/session/deregister`, local fallback cleanup of request files.
 - **platform_utils.py** — Cross-platform utilities. OS detection, temp directory paths, process tree walking (via `/proc` on Linux, `CreateToolhelp32Snapshot` on Windows), path encoding.
 - **win_send_keys.py** — Windows console input helper. Attaches to a target process's console via `AttachConsole` and injects keyboard input via `WriteConsoleInputW`. Runs as a subprocess to avoid disrupting the server's console.
@@ -100,7 +100,7 @@ Patterns in `settings.local.json` (tier 1) use `ToolName(pattern)` format with g
 - Session state is derived from transcript JSONL (not stored as a state machine)
 - Session-level auto-allow rules: see tier 4 in [Auto-Allow Tiers](#auto-allow-tiers)
 - Zombie sessions (dead PIDs) are cleaned up every 30 seconds
-- **Pane/console eviction:** when a new session registers on the same tmux pane (Linux) or console_pid (Windows), previous sessions on that pane/console are automatically evicted (including their auto-allow rules)
+- **Terminal eviction:** when a new session registers with the same `terminal_id` (tmux pane on Linux, shell PID on Windows), previous sessions on that terminal are automatically evicted (including their auto-allow rules)
 - **Registration source parameter:** the `source` field (`startup`, `resume`, `clear`, `compact`) controls behavior:
   - `startup` or new session — creates fresh session state
   - `resume`/`compact` — updates transcript path and resets parsing offset, preserving auto-allow rules
@@ -119,9 +119,11 @@ The server reads transcript JSONL files incrementally (tracking byte offset). St
 | Last tool_use is `ExitPlanMode` | **plan_review** |
 
 ### Prompt Delivery
-**Linux/macOS (Tmux):** SessionStart hook passes `$TMUX_PANE` and `$TMUX`. Server extracts socket path and sends prompts via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys Enter`.
+SessionStart hook registers `terminal_id` — a stable per-pane identifier (tmux pane ID on Linux/macOS, shell PID on Windows). The server uses it for prompt delivery:
 
-**Windows (Console):** SessionStart hook passes `console_pid` (parent shell PID). Server invokes `win_send_keys.py` as a subprocess, which attaches to the target console via `AttachConsole` and injects keyboard input via `WriteConsoleInputW`.
+**Linux/macOS (Tmux):** `terminal_id` = `$TMUX_PANE`. Server sends prompts via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys Enter`, using `tmux_socket` for the socket path.
+
+**Windows (Console):** `terminal_id` = shell PID (claude's parent process). Server invokes `win_send_keys.py` as a subprocess, which calls `AttachConsole(shell_pid)` and injects keyboard input via `WriteConsoleInputW`.
 
 ### Server Offline Fallback
 All hooks auto-approve when the server is unreachable, so Claude Code continues to function normally.

@@ -119,6 +119,67 @@ def _find_claude_pid_windows(start_pid):
     return start_pid
 
 
+def find_shell_pid(start_pid=None):
+    """Find the shell process PID (claude's parent) — stable terminal anchor on Windows."""
+    claude_pid = find_claude_pid(start_pid)
+    if IS_WINDOWS:
+        return _get_parent_pid_windows(claude_pid) or claude_pid
+    return _get_parent_pid_unix(claude_pid) or claude_pid
+
+
+def _get_parent_pid_unix(pid):
+    """Get parent PID via /proc."""
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("PPid:"):
+                    return int(line.split()[1])
+    except (FileNotFoundError, PermissionError, ValueError):
+        pass
+    return None
+
+
+def _get_parent_pid_windows(pid):
+    """Get parent PID using CreateToolhelp32Snapshot."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    TH32CS_SNAPPROCESS = 0x00000002
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wt.DWORD),
+            ("cntUsage", wt.DWORD),
+            ("th32ProcessID", wt.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wt.DWORD),
+            ("cntThreads", wt.DWORD),
+            ("th32ParentProcessID", wt.DWORD),
+            ("pcPriClassBase", wt.LONG),
+            ("dwFlags", wt.DWORD),
+            ("szExeFile", ctypes.c_wchar * 260),
+        ]
+
+    k32 = ctypes.windll.kernel32
+    snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snap == ctypes.c_void_p(-1).value:
+        return None
+
+    try:
+        pe = PROCESSENTRY32W()
+        pe.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        if k32.Process32FirstW(snap, ctypes.byref(pe)):
+            while True:
+                if pe.th32ProcessID == pid:
+                    return pe.th32ParentProcessID
+                if not k32.Process32NextW(snap, ctypes.byref(pe)):
+                    break
+    finally:
+        k32.CloseHandle(snap)
+
+    return None
+
+
 def is_process_alive(pid):
     """Check if a process is alive (cross-platform)."""
     if IS_WINDOWS:
@@ -309,20 +370,20 @@ def _get_process_name_windows(pid):
 
 def send_prompt(session_info, prompt_text):
     """Send a prompt to a session, dispatching to the appropriate platform method."""
-    if IS_WINDOWS:
-        console_pid = session_info.get("console_pid")
-        if console_pid:
-            return _send_prompt_windows(console_pid, prompt_text)
+    terminal_id = session_info.get("terminal_id")
+    if not terminal_id:
         return False
+    if IS_WINDOWS:
+        return _send_prompt_windows(int(terminal_id), prompt_text)
     return _send_prompt_tmux(session_info, prompt_text)
 
 
-def _send_prompt_windows(console_pid, text):
+def _send_prompt_windows(target_pid, text):
     """Send a prompt to a Windows console via win_send_keys.py subprocess."""
     try:
         result = subprocess.run(
             [sys.executable, os.path.join(os.path.dirname(__file__), "win_send_keys.py"),
-             str(console_pid)],
+             str(target_pid)],
             input=text.encode("utf-8"), capture_output=True, timeout=10
         )
         return result.returncode == 0
@@ -333,7 +394,7 @@ def _send_prompt_windows(console_pid, text):
 def _send_prompt_tmux(session_info, prompt):
     """Send a prompt to a tmux pane."""
     tmux_socket = session_info.get("tmux_socket", "")
-    pane = session_info.get("tmux_pane", "")
+    pane = session_info.get("terminal_id", "")
     if not pane:
         return False
 

@@ -42,8 +42,8 @@ server_name = "local"
 sessions = {}
 # sessions[session_id] = {
 #     "transcript_path": str,
-#     "tmux_pane": str,
-#     "tmux_socket": str,
+#     "terminal_id": str,          # stable terminal anchor: tmux pane ID (Linux) or shell PID (Windows)
+#     "tmux_socket": str,          # Linux only: tmux socket path for send-keys
 #     "cwd": str,
 #     "registered_at": float,
 #     "transcript_offset": int,
@@ -356,22 +356,30 @@ def _cleanup_stale_request(request_id):
 
 def _is_session_alive(sid, session_data):
     """Check if a session is still active."""
-    # For numeric session IDs (PIDs), check if the process is alive
+    # Quick path: if session_id is a numeric PID and it's alive, session is definitely alive
     try:
-        pid = int(sid)
-        return is_process_alive(pid)
+        if is_process_alive(int(sid)):
+            return True
     except ValueError:
         pass  # Non-numeric (UUID) session ID
 
-    # On Windows, check console_pid if available
+    terminal_id = session_data.get("terminal_id", "")
+
     if IS_WINDOWS:
-        console_pid = session_data.get("console_pid")
-        if console_pid:
+        if terminal_id:
             try:
-                return is_process_alive(int(console_pid))
+                shell_pid = int(terminal_id)
+                if not is_process_alive(shell_pid):
+                    return False  # Shell died = terminal closed
+                # Shell alive — check if claude/node is among its children
+                for child in get_process_children(shell_pid):
+                    name = get_process_name(child).lower()
+                    if "claude" in name or "node" in name:
+                        return True
+                return False  # Shell alive but no claude child
             except (ValueError, TypeError):
                 pass
-        # No console_pid (auto-discovered session) — check transcript mtime
+        # No terminal_id (auto-discovered session) — check transcript mtime
         transcript_path = session_data.get("transcript_path", "")
         if transcript_path:
             try:
@@ -386,10 +394,9 @@ def _is_session_alive(sid, session_data):
             return True
         return False
 
-    # For UUID session IDs, check if the tmux pane exists and has claude in its process tree
-    tmux_pane = session_data.get("tmux_pane", "")
+    # Linux/macOS: check if the tmux pane exists and has claude in its process tree
     tmux_socket = session_data.get("tmux_socket", "")
-    if tmux_pane and tmux_socket:
+    if terminal_id and tmux_socket:
         socket_path = tmux_socket.split(",")[0]
         try:
             # Get the pane's shell PID
@@ -401,7 +408,7 @@ def _is_session_alive(sid, session_data):
             shell_pid = None
             for line in result.stdout.strip().splitlines():
                 parts = line.split(" ", 1)
-                if len(parts) == 2 and parts[0] == tmux_pane:
+                if len(parts) == 2 and parts[0] == terminal_id:
                     shell_pid = parts[1]
                     break
             if not shell_pid:
@@ -482,11 +489,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
             result = []
             with sessions_lock:
                 for sid, s in sessions.items():
-                    # Determine if this session can receive prompts
-                    if IS_WINDOWS:
-                        can_prompt = bool(s.get("console_pid"))
-                    else:
-                        can_prompt = bool(s.get("tmux_pane"))
+                    can_prompt = bool(s.get("terminal_id"))
                     entry = {
                         "session_id": sid,
                         "cwd": s["cwd"],
@@ -589,40 +592,27 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 return
 
             transcript_path = body.get("transcript_path", "")
-            tmux_pane = body.get("tmux_pane", "")
+            terminal_id = body.get("terminal_id", "")
             tmux_socket = body.get("tmux_socket", "")
-            console_pid = body.get("console_pid", "")
             cwd = body.get("cwd", "")
 
             with sessions_lock:
-                # Evict other sessions on the same tmux pane (new session_id on same pane)
-                if source in ("startup", "resume", "clear") and tmux_pane:
-                    evict = [k for k, v in sessions.items() if k != sid and v.get("tmux_pane") == tmux_pane]
+                # Evict other sessions on the same terminal (new session_id on same pane/tab)
+                if source in ("startup", "resume", "clear") and terminal_id:
+                    evict = [k for k, v in sessions.items() if k != sid and v.get("terminal_id") == terminal_id]
                     for k in evict:
                         del sessions[k]
                         keys_to_remove = [ak for ak in session_auto_allow if ak[0] == k]
                         for ak in keys_to_remove:
                             del session_auto_allow[ak]
                     if evict:
-                        print(f"[~] Evicted session(s) on pane {tmux_pane}: {evict}")
-
-                # Evict other sessions on the same Windows console_pid (new session_id on same pane)
-                if source in ("startup", "resume", "clear") and console_pid:
-                    evict = [k for k, v in sessions.items() if k != sid and v.get("console_pid") == console_pid]
-                    for k in evict:
-                        del sessions[k]
-                        keys_to_remove = [ak for ak in session_auto_allow if ak[0] == k]
-                        for ak in keys_to_remove:
-                            del session_auto_allow[ak]
-                    if evict:
-                        print(f"[~] Evicted session(s) on console_pid {console_pid}: {evict}")
+                        print(f"[~] Evicted session(s) on terminal {terminal_id}: {evict}")
 
                 if source == "startup" or sid not in sessions:
                     sessions[sid] = {
                         "transcript_path": transcript_path,
-                        "tmux_pane": tmux_pane,
+                        "terminal_id": terminal_id,
                         "tmux_socket": tmux_socket,
-                        "console_pid": console_pid,
                         "cwd": cwd,
                         "registered_at": time.time(),
                         "transcript_offset": 0,
@@ -639,12 +629,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
                     s["transcript_offset"] = 0
                     s["transcript_entries"] = []
                     s["last_activity"] = time.time()
-                    if tmux_pane:
-                        s["tmux_pane"] = tmux_pane
+                    if terminal_id:
+                        s["terminal_id"] = terminal_id
                     if tmux_socket:
                         s["tmux_socket"] = tmux_socket
-                    if console_pid:
-                        s["console_pid"] = console_pid
                     if cwd:
                         s["cwd"] = cwd
 
@@ -668,7 +656,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
                         except (json.JSONDecodeError, IOError):
                             continue
 
-            pane_info = f"pane={tmux_pane}" if tmux_pane else f"console_pid={console_pid}" if console_pid else "no-pane"
+            pane_info = f"terminal={terminal_id}" if terminal_id else "no-terminal"
             print(f"[*] Session registered: {sid} source={source} {pane_info}")
             self._respond_json({"ok": True})
 
@@ -884,7 +872,7 @@ def _scan_sessions_from_transcripts():
     """Discover sessions by scanning ~/.claude/projects/ for recent transcript files.
 
     Used on Windows where tmux is not available. Registers sessions as read-only
-    (no console_pid for prompt delivery) until the next hook fires.
+    (no terminal_id for prompt delivery) until the next hook fires.
     """
     home = os.path.expanduser("~")
     projects_dir = os.path.join(home, ".claude", "projects")
@@ -911,9 +899,8 @@ def _scan_sessions_from_transcripts():
                     continue
                 sessions[session_id] = {
                     "transcript_path": jsonl_file,
-                    "tmux_pane": "",
+                    "terminal_id": "",
                     "tmux_socket": "",
-                    "console_pid": "",
                     "cwd": proj_path,
                     "registered_at": now,
                     "transcript_offset": 0,
@@ -1035,7 +1022,7 @@ def scan_existing_sessions():
                         continue
                     sessions[session_id] = {
                         "transcript_path": transcript_path,
-                        "tmux_pane": pane_id,
+                        "terminal_id": pane_id,
                         "tmux_socket": tmux_socket,
                         "cwd": cwd,
                         "registered_at": time.time(),
@@ -1046,7 +1033,7 @@ def scan_existing_sessions():
                         "last_summary": "",
                         "last_user_prompt": "",
                     }
-                print(f"[*] Auto-discovered session: {session_id} pane={pane_id} cwd={cwd}")
+                print(f"[*] Auto-discovered session: {session_id} terminal={pane_id} cwd={cwd}")
 
 
 def main():

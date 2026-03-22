@@ -25,6 +25,7 @@ Output: JSON on stdout with { hookSpecificOutput: { decision: { behavior: "allow
 
 import atexit
 import fnmatch
+import glob
 import json
 import os
 import re
@@ -398,6 +399,45 @@ def main():
     except Exception:
         # Tier 5: Server offline — allow everything so Claude keeps working
         allow_response()
+
+    # Dedup: if this session already has a pending request for the same tool+input,
+    # piggyback on it instead of creating a duplicate.
+    # (Claude Code may invoke the permission hook twice for the same tool call.)
+    existing_rid = None
+    for fpath in glob.glob(os.path.join(QUEUE_DIR, "*.request.json")):
+        resp_path = fpath.replace(".request.json", ".response.json")
+        if os.path.exists(resp_path):
+            continue
+        try:
+            with open(fpath) as f:
+                existing = json.load(f)
+            if (str(existing.get("session_id", "")) == str(session_id)
+                    and existing.get("tool_name") == tool_name
+                    and existing.get("tool_input") == tool_input):
+                existing_rid = existing.get("id", "")
+                break
+        except (json.JSONDecodeError, IOError):
+            continue
+
+    if existing_rid:
+        # Piggyback: poll the existing request's response file
+        response_file = os.path.join(QUEUE_DIR, f"{existing_rid}.response.json")
+        elapsed = 0
+        while elapsed < TIMEOUT:
+            if os.path.isfile(response_file):
+                try:
+                    with open(response_file) as f:
+                        resp = json.load(f)
+                    decision = resp.get("decision", "deny")
+                    if decision in ("allow", "always"):
+                        allow_response()
+                    else:
+                        deny_response(resp.get("message", "User denied"))
+                except (json.JSONDecodeError, IOError):
+                    pass
+            time.sleep(0.5)
+            elapsed += 1
+        deny_response("Approval timed out")
 
     # Generate request ID
     try:

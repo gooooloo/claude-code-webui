@@ -100,28 +100,35 @@ _lock = threading.Lock()
 
 def _load_threads():
     """Load persisted session threads from disk."""
-    global _session_threads
+    global _session_threads, _notified_requests, _request_card_ids
     if not os.path.exists(_THREADS_FILE):
         return
     try:
         with open(_THREADS_FILE) as f:
             data = json.load(f)
-        for sid, t in data.items():
+        # Restore per-session threads
+        threads = data if not data.get("__meta__") else data.get("threads", {})
+        for sid, t in threads.items():
             t["pending_request_ids"] = set(t.get("pending_request_ids", []))
             t.setdefault("topic_named", False)
-        _session_threads = data
-        print(f"[feishu] Restored {len(data)} session thread(s) from disk")
+        _session_threads = threads
+        # Restore notification state (survives server restarts)
+        if isinstance(data.get("__meta__"), dict):
+            _notified_requests = set(data["__meta__"].get("notified_requests", []))
+            _request_card_ids = data["__meta__"].get("request_card_ids", {})
+        print(f"[feishu] Restored {len(_session_threads)} session thread(s) from disk"
+              f" ({len(_notified_requests)} notified requests)")
     except (json.JSONDecodeError, IOError) as e:
         print(f"[feishu] Failed to load threads: {e}")
 
 
 def _save_threads():
-    """Persist session threads to disk. Must be called with _lock held."""
+    """Persist session threads and notification state to disk. Must be called with _lock held."""
     try:
         os.makedirs(_DATA_DIR, exist_ok=True)
-        serializable = {}
+        threads = {}
         for sid, t in _session_threads.items():
-            serializable[sid] = {
+            threads[sid] = {
                 "root_message_id": t["root_message_id"],
                 "sent_index": t["sent_index"],
                 "last_state": t["last_state"],
@@ -129,6 +136,13 @@ def _save_threads():
                 "topic_named": t.get("topic_named", False),
                 "created_at": t.get("created_at", ""),
             }
+        serializable = {
+            "threads": threads,
+            "__meta__": {
+                "notified_requests": list(_notified_requests),
+                "request_card_ids": dict(_request_card_ids),
+            },
+        }
         tmp = _THREADS_FILE + ".tmp"
         with open(tmp, "w") as f:
             json.dump(serializable, f, indent=2)
@@ -929,6 +943,9 @@ def _sync_transcript(sid, thread):
         messages = _format_transcript_entry(entry)
         for text, _ in messages:
             if text:
+                if "ExitPlanMode" in text:
+                    kind = "markdown_card" if text.startswith("[Claude] ") else "post"
+                    print(f"[feishu] Transcript sync ExitPlanMode as {kind}: {text[:120]}")
                 if text.startswith("[Claude] "):
                     _reply_markdown_card(root_mid, text)
                 else:
@@ -1192,6 +1209,8 @@ def _handle_permission_action(request_id, decision, value):
     # Update the permission card to show resolved state (no buttons)
     with _lock:
         mid = _request_card_ids.pop(request_id, None)
+        _notified_requests.discard(request_id)
+        _save_threads()
     if mid:
         resolved_card = _build_permission_resolved_card(request_id, req_data, decision)
         _update_card(mid, resolved_card)
@@ -1233,6 +1252,8 @@ def _handle_question_action(request_id, value):
     # Update the question card to show resolved state (no buttons)
     with _lock:
         mid = _request_card_ids.pop(request_id, None)
+        _notified_requests.discard(request_id)
+        _save_threads()
     if mid:
         resolved_card = _build_question_resolved_card(request_id, req_data, option_label)
         _update_card(mid, resolved_card)
@@ -1347,14 +1368,17 @@ def _scan_once():
 
     # Resolved requests → update cards to show resolved state
     resolved = notified_snapshot - pending_ids
-    with _lock:
-        for rid in resolved:
-            _request_card_ids.pop(rid, None)
-            _notified_requests.discard(rid)
-            for thread in _session_threads.values():
-                thread["pending_request_ids"].discard(rid)
+    if resolved:
+        with _lock:
+            for rid in resolved:
+                _request_card_ids.pop(rid, None)
+                _notified_requests.discard(rid)
+                for thread in _session_threads.values():
+                    thread["pending_request_ids"].discard(rid)
+            _save_threads()
 
     # New permission requests → send card into session topic
+    new_cards_sent = False
     for rid, data in pending.items():
         if rid in notified_snapshot:
             continue
@@ -1370,6 +1394,9 @@ def _scan_once():
         with _lock:
             thread = _session_threads.get(req_sid)
 
+        print(f"[feishu] Sending card: rid={rid} tool={tool_name} sid={req_sid[:8] if req_sid else '?'}"
+              f" notified_before={len(notified_snapshot)} pending_total={len(pending)}")
+
         if thread:
             mid = _reply_card(thread["root_message_id"], card)
             if mid:
@@ -1382,6 +1409,11 @@ def _scan_once():
             _notified_requests.add(rid)
             if mid:
                 _request_card_ids[rid] = mid
+            new_cards_sent = True
+
+    if new_cards_sent:
+        with _lock:
+            _save_threads()
 
     # ── Stage 3: Ended sessions → send farewell, clean up ──
     with _lock:

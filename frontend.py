@@ -747,7 +747,7 @@ HTML_PAGE = """<!DOCTYPE html>
   </div>
   <div class="prompt-area" id="promptArea">
     <div class="prompt-row">
-      <textarea class="prompt-input" id="promptInput" placeholder="Send a prompt..." rows="1" oninput="autoResize(this)"></textarea>
+      <textarea class="prompt-input" id="promptInput" placeholder="Type a prompt... Ctrl+Enter to send" rows="1" oninput="autoResize(this)"></textarea>
       <button class="btn-send" onclick="sendPrompt()">Send</button>
     </div>
     <div class="prompt-bottom-row">
@@ -945,7 +945,7 @@ function buildCardHTML(s) {
   }
   if (state === 'idle' && s.prompt_capable !== false) {
     html += '<div class="sc-prompt-row" onclick="event.stopPropagation()">';
-    html += '<input class="sc-prompt-input" id="dashPrompt-' + esc(s.session_id) + '" placeholder="Send a prompt..." onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\\'Enter\\'){event.preventDefault();sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')}">';
+    html += '<input class="sc-prompt-input" id="dashPrompt-' + esc(s.session_id) + '" placeholder="Type a prompt... Ctrl+Enter to send" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\\'Enter\\'){event.preventDefault();sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')}">';
     html += '<button class="sc-prompt-send" onclick="sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')">Send</button>';
     html += '</div>';
     html += '<div class="sc-shortcut-row" onclick="event.stopPropagation()">';

@@ -1016,8 +1016,13 @@ function renderDashboard(sessions) {
       if (prev !== h) {
         const focused = document.activeElement;
         if (!(focused && focused.id === 'dashPrompt-' + sid)) {
+          const wasBusy = prev && prev.startsWith('busy:');
           card.innerHTML = buildCardHTML(s);
           card.setAttribute('data-hash', h);
+          if (wasBusy && state === 'idle') {
+            const ta = card.querySelector('.sc-prompt-input');
+            if (ta) ta.focus();
+          }
         }
       }
     } else {
@@ -1117,12 +1122,14 @@ async function fetchSessionDetail() {
     const promptArea = document.getElementById('promptArea');
     if (promptArea) promptArea.style.display = session.prompt_capable === false ? 'none' : '';
 
-    // Disable prompt input when not idle
+    // Disable prompt input when not idle, auto-focus when becoming idle
     const pi = document.getElementById('promptInput');
     const sendBtn = document.querySelector('.btn-send');
     if (pi) {
+      const wasDisabled = pi.disabled;
       pi.disabled = state !== 'idle';
       pi.placeholder = state !== 'idle' ? 'Waiting...' : 'Type a prompt... Ctrl+Enter to send';
+      if (wasDisabled && !pi.disabled) pi.focus();
     }
     if (sendBtn) sendBtn.disabled = state !== 'idle';
 
@@ -2029,6 +2036,30 @@ document.addEventListener('keydown', function(e) {
     el.selectionStart = el.selectionEnd = start + 1;
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
+  }
+});
+
+// Press "/" to focus prompt input (last interacted session on dashboard, or detail input)
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
+    const tag = (document.activeElement || {}).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    if (currentView === 'detail') {
+      const pi = document.getElementById('promptInput');
+      if (pi && !pi.disabled) pi.focus();
+    } else {
+      // Find the most recently interacted session's input
+      let best = null, bestTime = -1;
+      document.querySelectorAll('.sc-prompt-input:not([disabled])').forEach(function(el) {
+        const sid = (el.id || '').replace('dashPrompt-', '');
+        const t = getInteractTime(sid);
+        if (t > bestTime) { bestTime = t; best = el; }
+      });
+      // If no interaction yet, pick the first one
+      if (!best) best = document.querySelector('.sc-prompt-input:not([disabled])');
+      if (best) best.focus();
+    }
   }
 });
 

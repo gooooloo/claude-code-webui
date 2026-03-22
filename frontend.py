@@ -1912,11 +1912,42 @@ function renderImagePreviews() {
   ).join('');
 }
 
-// Ctrl+Enter to send
+// Delete last word using Intl.Segmenter (supports CJK)
+function deleteLastWord(el) {
+  const start = el.selectionStart;
+  const before = el.value.substring(0, start);
+  const after = el.value.substring(el.selectionEnd);
+  // Strip trailing whitespace first
+  const trimmed = before.replace(/\\s+$/, '');
+  if (!trimmed) { el.value = after; el.selectionStart = el.selectionEnd = 0; return; }
+  let newBefore = trimmed;
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'word' });
+    const segments = [...seg.segment(trimmed)];
+    // Find last word-like segment
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (segments[i].isWordLike) {
+        newBefore = trimmed.substring(0, segments[i].index);
+        break;
+      }
+    }
+  } else {
+    newBefore = trimmed.replace(/[^\\s]+$/, '');
+  }
+  el.value = newBefore + after;
+  el.selectionStart = el.selectionEnd = newBefore.length;
+}
+
+// Ctrl+Enter to send, Ctrl+W to delete last word
 document.getElementById('promptInput').addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
     sendPrompt();
+  }
+  if (e.ctrlKey && e.key === 'w') {
+    e.preventDefault();
+    deleteLastWord(this);
+    this.dispatchEvent(new Event('input'));
   }
 });
 
@@ -1948,6 +1979,14 @@ document.getElementById('promptInput').addEventListener('paste', function(e) {
     fetchSessions();
   }
 })();
+
+// Ctrl+W to delete last word in dashboard prompt inputs (delegated)
+document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey && e.key === 'w' && e.target.classList.contains('sc-prompt-input')) {
+    e.preventDefault();
+    deleteLastWord(e.target);
+  }
+});
 
 // ── Polling ──
 pollTimer = setInterval(() => {

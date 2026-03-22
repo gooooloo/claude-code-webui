@@ -821,7 +821,9 @@ function sortDashboardCards() {
     const ca = a.classList.contains('collapsed') ? 1 : 0;
     const cb = b.classList.contains('collapsed') ? 1 : 0;
     if (ca !== cb) return ca - cb;
-    return getInteractTime(b.getAttribute('data-sid')) - getInteractTime(a.getAttribute('data-sid'));
+    const na = (a.querySelector('.sc-project')?.textContent || '').toLowerCase();
+    const nb = (b.querySelector('.sc-project')?.textContent || '').toLowerCase();
+    return na.localeCompare(nb);
   });
   cards.forEach(c => el.appendChild(c));
 }
@@ -989,7 +991,9 @@ function renderDashboard(sessions) {
     const ca = collapsedSet.has(a.session_id) ? 1 : 0;
     const cb = collapsedSet.has(b.session_id) ? 1 : 0;
     if (ca !== cb) return ca - cb;
-    return getInteractTime(b.session_id) - getInteractTime(a.session_id);
+    const na = ((a.cwd || '').split('/').pop() || '').toLowerCase();
+    const nb = ((b.cwd || '').split('/').pop() || '').toLowerCase();
+    return na.localeCompare(nb);
   });
 
   const desiredOrder = sessions.map(s => s.session_id);

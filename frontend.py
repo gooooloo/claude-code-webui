@@ -1831,9 +1831,9 @@ async function sendPrompt() {
     } else {
       scrollToBottomOnNextRender = true;
       fetchSessionDetail();
+      setTimeout(fetchSessionDetail, 200);
       setTimeout(fetchSessionDetail, 500);
       setTimeout(fetchSessionDetail, 1000);
-      setTimeout(fetchSessionDetail, 1500);
       setTimeout(fetchSessionDetail, 2000);
     }
   } catch (e) {
@@ -1860,9 +1860,9 @@ async function quickPrompt(prompt) {
     } else {
       scrollToBottomOnNextRender = true;
       fetchSessionDetail();
+      setTimeout(fetchSessionDetail, 200);
       setTimeout(fetchSessionDetail, 500);
       setTimeout(fetchSessionDetail, 1000);
-      setTimeout(fetchSessionDetail, 1500);
       setTimeout(fetchSessionDetail, 2000);
     }
   } catch (e) {
@@ -1899,9 +1899,9 @@ async function sendDashboardPrompt(sessionId) {
       showToast('Failed to send prompt: ' + msg, true);
     } else {
       fetchSessions();
+      setTimeout(fetchSessions, 200);
       setTimeout(fetchSessions, 500);
       setTimeout(fetchSessions, 1000);
-      setTimeout(fetchSessions, 1500);
       setTimeout(fetchSessions, 2000);
     }
   } catch (e) {

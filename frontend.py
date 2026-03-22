@@ -1101,12 +1101,16 @@ function showDashboard() {
 
 let detailPollTimer = null;
 let scrollToBottomOnNextRender = false;
+async function detailPollLoop() {
+  await fetchSessionDetail();
+  detailPollTimer = setTimeout(detailPollLoop, 1000);
+}
 function startDetailPolling() {
   stopDetailPolling();
-  detailPollTimer = setInterval(fetchSessionDetail, 1000);
+  detailPollLoop();
 }
 function stopDetailPolling() {
-  if (detailPollTimer) { clearInterval(detailPollTimer); detailPollTimer = null; }
+  if (detailPollTimer) { clearTimeout(detailPollTimer); detailPollTimer = null; }
 }
 
 async function fetchSessionDetail() {
@@ -2074,9 +2078,11 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ── Polling ──
-pollTimer = setInterval(() => {
-  if (currentView === 'dashboard') fetchSessions();
-}, 1000);
+async function pollLoop() {
+  if (currentView === 'dashboard') await fetchSessions();
+  pollTimer = setTimeout(pollLoop, 1000);
+}
+pollLoop();
 </script>
 </body>
 </html>"""

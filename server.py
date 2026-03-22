@@ -20,6 +20,7 @@ import sys
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 import uuid
 import cgi
@@ -54,6 +55,16 @@ sessions = {}
 # }
 
 sessions_lock = threading.Lock()
+# Per-session locks for update_session_state: prevents concurrent transcript reads
+# for the same session from duplicating entries or racing on the offset.
+_session_update_locks = {}
+_session_update_locks_lock = threading.Lock()
+
+def _get_session_update_lock(sid):
+    with _session_update_locks_lock:
+        if sid not in _session_update_locks:
+            _session_update_locks[sid] = threading.Lock()
+        return _session_update_locks[sid]
 
 # Session-level auto-allow rules: { (session_id, tool_name): True }
 # These are volatile (in-memory only, cleared on session end/clear/server restart).
@@ -67,11 +78,16 @@ session_auto_allow = {}
 def update_session_state(sid):
     """Read new transcript entries incrementally and derive session state.
 
-    THREADING NOTE: The read-offset → read-file → write-offset sequence below
-    is safe only because HTTPServer (without ThreadingMixIn) serialises all HTTP
-    requests on a single thread.  If the server is ever made multi-threaded,
-    this needs a per-session lock or compare-and-swap on the offset.
+    Uses a per-session lock so concurrent requests for the same session
+    serialise cleanly: the second caller waits, then finds the offset
+    already advanced and returns with near-zero cost.
     """
+    lock = _get_session_update_lock(sid)
+    with lock:
+     _update_session_state_locked(sid)
+
+
+def _update_session_state_locked(sid):
     with sessions_lock:
         s = sessions.get(sid)
         if not s:
@@ -826,6 +842,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
     def _respond_json(self, data):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
@@ -1053,7 +1070,9 @@ def main():
             print(f"[feishu] Failed to start: {e}")
 
     bind_addr = "0.0.0.0" if args.lan else "127.0.0.1"
-    server = HTTPServer((bind_addr, PORT), WebUIHandler)
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    server = ThreadedHTTPServer((bind_addr, PORT), WebUIHandler)
     print(f"Claude Code WebUI Server running on http://{bind_addr}:{PORT}")
     print(f"Watching: {QUEUE_DIR}")
     print("Transcript-driven architecture | Tmux-only prompt delivery")

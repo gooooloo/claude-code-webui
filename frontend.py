@@ -1018,15 +1018,21 @@ function renderDashboard(sessions) {
       card.style.cssText = '--sh:' + hue;
       const prev = card.getAttribute('data-hash');
       if (prev !== h) {
-        const focused = document.activeElement;
-        if (!(focused && focused.id === 'dashPrompt-' + sid)) {
-          const wasBusy = prev && prev.startsWith('busy:');
-          card.innerHTML = buildCardHTML(s);
-          card.setAttribute('data-hash', h);
-          if (wasBusy && state === 'idle') {
-            const ta = card.querySelector('.sc-prompt-input');
-            if (ta) ta.focus();
+        const ta = card.querySelector('.sc-prompt-input');
+        const savedVal = ta ? ta.value : '';
+        const wasFocused = ta && document.activeElement === ta;
+        const wasBusy = prev && prev.startsWith('busy:');
+        card.innerHTML = buildCardHTML(s);
+        card.setAttribute('data-hash', h);
+        if (savedVal || wasFocused) {
+          const newTa = card.querySelector('.sc-prompt-input');
+          if (newTa) {
+            newTa.value = savedVal;
+            if (wasFocused) newTa.focus();
           }
+        } else if (wasBusy && state === 'idle') {
+          const newTa = card.querySelector('.sc-prompt-input');
+          if (newTa) newTa.focus();
         }
       }
     } else {

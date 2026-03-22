@@ -26,7 +26,7 @@ import uuid
 import cgi
 
 from frontend import HTML_PAGE
-from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, is_terminal_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path, send_prompt
+from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, is_terminal_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path, send_prompt, send_interrupt
 
 try:
     from channel_feishu import start_feishu_channel
@@ -263,6 +263,9 @@ def _derive_state(sid, s):
             # after stripping those tags.
             last_user_text = _extract_user_text(last_user)
             if last_user_text:
+                # Ctrl-C interrupt produces "[Request interrupted by user]" — treat as idle
+                if last_user_text.strip().startswith('[Request interrupted by user'):
+                    return "idle", "", ""
                 user_after_assistant = True
 
     # Invariant: summary is only shown when it follows the displayed user_prompt
@@ -779,6 +782,25 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 self._respond_json({"ok": True})
             else:
                 self.send_error(500, "Failed to send prompt")
+
+        elif path == "/api/send-interrupt":
+            body = self._read_json()
+            sid = str(body.get("session_id", ""))
+            if not sid:
+                self.send_error(400, "Missing session_id")
+                return
+
+            with sessions_lock:
+                s = sessions.get(sid)
+            if not s:
+                self.send_error(404, "Session not found")
+                return
+
+            if send_interrupt(s):
+                print(f"[>] Interrupt sent to session {sid}")
+                self._respond_json({"ok": True})
+            else:
+                self.send_error(500, "Failed to send interrupt")
 
         elif path == "/api/upload-image":
             os.makedirs(IMAGE_DIR, exist_ok=True)

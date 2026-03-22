@@ -207,6 +207,8 @@ HTML_PAGE = """<!DOCTYPE html>
     white-space: nowrap;
   }
   .sc-prompt-send:hover { background: #8b5cf6; }
+  .sc-interrupt { background: #ef4444; }
+  .sc-interrupt:hover { background: #dc2626; }
   .sc-shortcut-row {
     margin-top: 6px;
     display: flex;
@@ -632,6 +634,8 @@ HTML_PAGE = """<!DOCTYPE html>
   .btn-answer:hover { background: #06b6d4; }
   .btn-send { background: #a78bfa; color: white; padding: 10px 24px; white-space: nowrap; }
   .btn-send:hover { background: #8b5cf6; }
+  .btn-interrupt { background: #ef4444 !important; }
+  .btn-interrupt:hover { background: #dc2626 !important; }
   .btn-allow-path { background: #78350f; color: #fbbf24; }
   .btn-allow-path:hover { background: #92400e; }
   .buttons {
@@ -954,7 +958,11 @@ function buildCardHTML(s) {
     var disabled = state !== 'idle';
     html += '<div class="sc-prompt-row" onclick="event.stopPropagation()">';
     html += '<textarea class="sc-prompt-input" id="dashPrompt-' + esc(s.session_id) + '" placeholder="' + (disabled ? 'Waiting...' : 'Type a prompt... Ctrl+Enter to send') + '" rows="1"' + (disabled ? ' disabled' : '') + ' oninput="this.style.height=\\'auto\\';this.style.height=this.scrollHeight+\\'px\\'" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key===\\'Enter\\'){event.preventDefault();sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')}"></textarea>';
-    html += '<button class="sc-prompt-send" onclick="sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')"' + (disabled ? ' disabled' : '') + '>Send</button>';
+    if (state === 'busy') {
+      html += '<button class="sc-prompt-send sc-interrupt" onclick="sendInterrupt(\\'' + esc(s.session_id) + '\\')">Interrupt</button>';
+    } else {
+      html += '<button class="sc-prompt-send" onclick="sendDashboardPrompt(\\'' + esc(s.session_id) + '\\')"' + (disabled ? ' disabled' : '') + '>Send</button>';
+    }
     html += '</div>';
     html += '<div class="sc-shortcut-row" onclick="event.stopPropagation()">';
     html += '<button class="sc-shortcut-btn"' + (disabled ? ' disabled' : '') + ' onclick="insertAtCursor(\\'dashPrompt-' + esc(s.session_id) + '\\',\\'/clear\\')">/clear</button>';
@@ -1145,7 +1153,19 @@ async function fetchSessionDetail() {
       pi.placeholder = state !== 'idle' ? 'Waiting...' : 'Type a prompt... Ctrl+Enter to send';
       if (wasDisabled && !pi.disabled) pi.focus();
     }
-    if (sendBtn) sendBtn.disabled = state !== 'idle';
+    if (sendBtn) {
+      if (state === 'busy') {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Interrupt';
+        sendBtn.className = 'btn-send btn-interrupt';
+        sendBtn.onclick = function() { sendInterrupt(currentSessionId); };
+      } else {
+        sendBtn.disabled = state !== 'idle';
+        sendBtn.textContent = 'Send';
+        sendBtn.className = 'btn-send';
+        sendBtn.onclick = sendPrompt;
+      }
+    }
 
     // Render permission card if applicable
     renderPermCards(session);
@@ -1859,6 +1879,28 @@ async function sendPrompt() {
     }
   } catch (e) {
     showToast('Failed to send prompt: network error', true);
+  }
+}
+
+async function sendInterrupt(sessionId) {
+  if (!confirm('Send Ctrl-C to interrupt this session?')) return;
+  try {
+    const res = await fetch('/api/send-interrupt', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId})
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => 'Unknown error');
+      showToast('Failed to interrupt: ' + msg, true);
+    } else {
+      showToast('Interrupt sent');
+      fetchSessionDetail();
+      setTimeout(fetchSessionDetail, 500);
+      setTimeout(fetchSessionDetail, 1000);
+    }
+  } catch (e) {
+    showToast('Failed to interrupt: network error', true);
   }
 }
 

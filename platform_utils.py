@@ -448,6 +448,16 @@ def send_prompt(session_info, prompt_text):
     return _send_prompt_tmux(session_info, prompt_text)
 
 
+def send_interrupt(session_info):
+    """Send Ctrl-C (interrupt) to a session."""
+    terminal_id = session_info.get("terminal_id")
+    if not terminal_id:
+        return False
+    if IS_WINDOWS:
+        return _send_interrupt_windows(int(terminal_id))
+    return _send_interrupt_tmux(session_info)
+
+
 def _send_prompt_windows(target_pid, text):
     """Send a prompt to a Windows console via win_send_keys.py subprocess."""
     try:
@@ -497,5 +507,40 @@ def _send_prompt_tmux(session_info, prompt):
             capture_output=True, timeout=5
         )
         return r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _send_interrupt_tmux(session_info):
+    """Send Ctrl-C to a tmux pane."""
+    tmux_socket = session_info.get("tmux_socket", "")
+    pane = session_info.get("terminal_id", "")
+    if not pane:
+        return False
+
+    cmd_base = ["tmux"]
+    if tmux_socket:
+        socket_path = tmux_socket.split(",")[0]
+        cmd_base = ["tmux", "-S", socket_path]
+
+    try:
+        r = subprocess.run(
+            cmd_base + ["send-keys", "-t", pane, "C-c"],
+            capture_output=True, timeout=5
+        )
+        return r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _send_interrupt_windows(target_pid):
+    """Send Ctrl-C to a Windows console via win_send_keys.py subprocess."""
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "win_send_keys.py"),
+             str(target_pid)],
+            input=b"\x03", capture_output=True, timeout=10
+        )
+        return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False

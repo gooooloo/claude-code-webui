@@ -162,6 +162,40 @@ class TestDeriveStateBusy:
         state, summary, prompt = server._derive_state("s1", server.sessions["s1"])
         assert state == "busy"
 
+    def test_interrupt_is_idle(self):
+        """After Ctrl-C, transcript has '[Request interrupted by user]' — should be idle."""
+        entries = [
+            make_assistant_entry("Working on it...", stop_reason="stop_sequence"),
+            make_user_entry("[Request interrupted by user]"),
+        ]
+        setup_session("s1", entries)
+        state, summary, prompt = server._derive_state("s1", server.sessions["s1"])
+        assert state == "idle"
+
+    def test_interrupt_for_tool_use_is_idle(self):
+        """Interrupt during tool use should also be idle."""
+        entries = [
+            make_assistant_entry(
+                "Let me edit.",
+                tool_uses=[make_tool_use("Edit", {}, "tu-99")],
+                stop_reason="tool_use",
+            ),
+            make_user_entry("[Request interrupted by user for tool use]"),
+        ]
+        setup_session("s1", entries)
+        state, summary, prompt = server._derive_state("s1", server.sessions["s1"])
+        assert state == "idle"
+
+    def test_interrupt_with_no_stop_reason_is_idle(self):
+        """Interrupt when assistant had no stop_reason (empty/None)."""
+        entries = [
+            make_assistant_entry("Partial response...", stop_reason=""),
+            make_user_entry("[Request interrupted by user]"),
+        ]
+        setup_session("s1", entries)
+        state, summary, prompt = server._derive_state("s1", server.sessions["s1"])
+        assert state == "idle"
+
     def test_unresolved_tool_use(self):
         entries = [
             make_user_entry("fix the bug"),

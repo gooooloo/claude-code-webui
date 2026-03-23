@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A web UI for Claude Code that replaces default terminal prompts with a browser-based interface. Users approve/deny tool executions, submit prompts, upload images, and manage sessions through any browser on the LAN (phones, tablets, desktops).
+A web UI for Claude Code that replaces default terminal prompts with a browser-based interface. Users approve/deny tool executions, submit prompts, upload images, manage sessions, and export conversations through any browser or Feishu.
 
 **Architecture:** Transcript-driven, cross-platform (Tmux on Linux/macOS, Windows Terminal on Windows), minimal hooks.
 

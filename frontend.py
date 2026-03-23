@@ -781,6 +781,7 @@ HTML_PAGE = """<!DOCTYPE html>
   <button onclick="exportSelectedHTML()">Export HTML</button>
   <button onclick="exportSelectedPNG()">Export PNG</button>
   <button onclick="copySelectedPNG()">Copy PNG</button>
+  <button onclick="shareSelectedPNG()" id="sharePNGBtn" style="display:none">Share</button>
   <button class="cancel-btn" onclick="exitMultiSelect()">Cancel</button>
 </div>
 <div class="toast" id="toast"></div>
@@ -1660,6 +1661,13 @@ function enterMultiSelect(idx) {
   selectedMsgIndices.clear();
   selectedMsgIndices.add(idx);
   document.getElementById('multiSelectBar').style.display = 'flex';
+  // Show Share button only when Web Share API with file support is available (mobile)
+  try {
+    var testFile = new File([''], 'test.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [testFile] })) {
+      document.getElementById('sharePNGBtn').style.display = '';
+    }
+  } catch(e) {}
   updateMultiSelectUI();
 }
 
@@ -1835,10 +1843,22 @@ function renderPNG(mode) {
   // Wait one frame so the browser fully computes layout/styles, then make visible for capture
   requestAnimationFrame(function() { requestAnimationFrame(function() {
     container.style.opacity = '1';
-    var p = (mode === 'copy') ? htmlToImage.toBlob(container, opts) : htmlToImage.toPng(container, opts);
+    var useBlob = (mode === 'copy' || mode === 'share');
+    var p = useBlob ? htmlToImage.toBlob(container, opts) : htmlToImage.toPng(container, opts);
     p.then(function(result) {
       document.body.removeChild(container);
-      if (mode === 'copy') {
+      if (mode === 'share') {
+        var d = new Date();
+        var fname = 'claude-transcript-' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + '.png';
+        var file = new File([result], fname, { type: 'image/png' });
+        return navigator.share({ files: [file] }).then(function() {
+          showToast('Shared ' + count + ' items');
+          exitMultiSelect();
+        }).catch(function(e) {
+          // User cancelled share sheet — not an error
+          if (e.name !== 'AbortError') showToast('Share failed: ' + e.message, true);
+        });
+      } else if (mode === 'copy') {
         return navigator.clipboard.write([new ClipboardItem({ 'image/png': result })]).then(function() {
           showToast('Copied ' + count + ' items as PNG');
           exitMultiSelect();
@@ -1854,13 +1874,14 @@ function renderPNG(mode) {
       }
     }).catch(function(err) {
       try { document.body.removeChild(container); } catch(e) {}
-      showToast((mode === 'copy' ? 'Copy' : 'Export') + ' PNG failed: ' + err.message, true);
+      showToast((mode === 'copy' ? 'Copy' : mode === 'share' ? 'Share' : 'Export') + ' PNG failed: ' + err.message, true);
     });
   }); });
 }
 
 function exportSelectedPNG() { renderPNG('export'); }
 function copySelectedPNG() { renderPNG('copy'); }
+function shareSelectedPNG() { renderPNG('share'); }
 
 function showToast(msg, isError) {
   const el = document.getElementById('toast');

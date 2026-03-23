@@ -1,5 +1,7 @@
 # claude-code-webui
 
+[中文文档](README_CN.md)
+
 A web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that replaces default terminal prompts with a browser-based interface. Approve/deny tool calls, submit prompts, upload images, manage sessions, and export conversations from any browser or Feishu.
 
 ## Architecture

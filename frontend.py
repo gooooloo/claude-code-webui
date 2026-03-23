@@ -1101,6 +1101,10 @@ function renderDashboard(sessions) {
   const el = document.getElementById('sessionList');
   const hasFederation = federationRemoteNames.length > 0;
 
+  // Skip refresh if user is typing in a non-empty input
+  const ae = document.activeElement;
+  if (ae && el.contains(ae) && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT') && ae.value.length > 0) return;
+
   if (sessions.length === 0 && !hasFederation) {
     if (lastDashboardHash !== 'empty') {
       el.innerHTML = '<div class="empty"><span class="dot"></span>No active sessions</div>';

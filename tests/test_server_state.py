@@ -395,8 +395,16 @@ class TestUpdateSessionState:
     def test_missing_transcript(self):
         setup_session("s1", [])
         server.sessions["s1"]["transcript_path"] = "/nonexistent/path.jsonl"
-        # Should not raise
+        server.sessions["s1"]["derived_state"] = "busy"
         server.update_session_state("s1")
+        assert server.sessions["s1"]["derived_state"] == "idle"
+
+    def test_empty_transcript_path(self):
+        setup_session("s1", [])
+        server.sessions["s1"]["transcript_path"] = ""
+        server.sessions["s1"]["derived_state"] = "busy"
+        server.update_session_state("s1")
+        assert server.sessions["s1"]["derived_state"] == "idle"
 
     def test_nonexistent_session(self):
         # Should not raise

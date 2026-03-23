@@ -140,6 +140,10 @@ def _update_session_state_locked(sid):
         offset = s["transcript_offset"]
 
     if not path or not os.path.isfile(path):
+        with sessions_lock:
+            s = sessions.get(sid)
+            if s:
+                s["derived_state"] = "idle"
         return
 
     try:
@@ -741,7 +745,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
                         "registered_at": time.time(),
                         "transcript_offset": 0,
                         "transcript_entries": [],
-                        "derived_state": "busy",
+                        "derived_state": "idle",
                         "last_activity": time.time(),
                         "last_summary": "",
                         "last_user_prompt": "",
@@ -1124,7 +1128,7 @@ def _restore_sessions_from_terminal_mappings():
                 "registered_at": now,
                 "transcript_offset": 0,
                 "transcript_entries": [],
-                "derived_state": "busy",
+                "derived_state": "idle",
                 "last_activity": now,
                 "last_summary": "",
                 "last_user_prompt": "",
@@ -1247,7 +1251,7 @@ def scan_existing_sessions():
                         "registered_at": time.time(),
                         "transcript_offset": 0,
                         "transcript_entries": [],
-                        "derived_state": "busy",
+                        "derived_state": "idle",
                         "last_activity": time.time(),
                         "last_summary": "",
                         "last_user_prompt": "",

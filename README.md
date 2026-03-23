@@ -1,6 +1,6 @@
 # claude-code-webui
 
-A web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that replaces default terminal prompts with a browser-based interface. Approve/deny tool calls, submit prompts, upload images, and manage sessions from your phone, tablet, or any browser on your network.
+A web UI for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that replaces default terminal prompts with a browser-based interface. Approve/deny tool calls, submit prompts, upload images, manage sessions, and export conversations from any browser or Feishu.
 
 ## Architecture
 

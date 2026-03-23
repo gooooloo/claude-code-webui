@@ -1,6 +1,6 @@
 # claude-code-webui
 
-一个 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 的 Web UI，用浏览器界面替代默认的终端交互。在手机、平板或局域网内的任意浏览器上审批工具调用、提交 prompt、上传图片、管理会话。
+一个 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 的 Web UI，用浏览器界面替代默认的终端交互。在任意浏览器或飞书上审批工具调用、提交 prompt、上传图片、管理会话、导出对话。
 
 ## 架构
 

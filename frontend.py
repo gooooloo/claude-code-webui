@@ -781,7 +781,7 @@ HTML_PAGE = """<!DOCTYPE html>
   <button onclick="exportSelectedHTML()">Export HTML</button>
   <button onclick="exportSelectedPNG()">Export PNG</button>
   <button onclick="copySelectedPNG()">Copy PNG</button>
-  <button onclick="shareSelectedPNG()" id="sharePNGBtn" style="display:none">Share</button>
+  <button onclick="shareSelectedPNG()">Share</button>
   <button class="cancel-btn" onclick="exitMultiSelect()">Cancel</button>
 </div>
 <div class="toast" id="toast"></div>
@@ -1661,10 +1661,6 @@ function enterMultiSelect(idx) {
   selectedMsgIndices.clear();
   selectedMsgIndices.add(idx);
   document.getElementById('multiSelectBar').style.display = 'flex';
-  // Show Share button when Web Share API is available
-  if (navigator.share) {
-    document.getElementById('sharePNGBtn').style.display = '';
-  }
   updateMultiSelectUI();
 }
 
@@ -1845,6 +1841,10 @@ function renderPNG(mode) {
     p.then(function(result) {
       document.body.removeChild(container);
       if (mode === 'share') {
+        if (!navigator.share) {
+          showToast('Share requires HTTPS — use Export PNG instead', true);
+          return;
+        }
         var d = new Date();
         var fname = 'claude-transcript-' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + '.png';
         var file = new File([result], fname, { type: 'image/png' });

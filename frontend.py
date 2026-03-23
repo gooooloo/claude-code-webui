@@ -1641,7 +1641,11 @@ function exportSelectedPNG() {
   const count = container._count;
   document.body.appendChild(container);
   showToast('Generating PNG...');
-  htmlToImage.toPng(container, { pixelRatio: 2, backgroundColor: '#1a1a2e' }).then(function(dataUrl) {
+  var opts = { pixelRatio: 2, backgroundColor: '#1a1a2e' };
+  // Warm-up render: first pass loads fonts/styles into SVG context, discard result
+  htmlToImage.toPng(container, opts).then(function() {
+    return htmlToImage.toPng(container, opts);
+  }).then(function(dataUrl) {
     document.body.removeChild(container);
     const link = document.createElement('a');
     const d = new Date();
@@ -1666,7 +1670,11 @@ function copySelectedPNG() {
   const count = container._count;
   document.body.appendChild(container);
   showToast('Generating PNG...');
-  htmlToImage.toBlob(container, { pixelRatio: 2, backgroundColor: '#1a1a2e' }).then(function(blob) {
+  var opts = { pixelRatio: 2, backgroundColor: '#1a1a2e' };
+  // Warm-up render: first pass loads fonts/styles into SVG context, discard result
+  htmlToImage.toBlob(container, opts).then(function() {
+    return htmlToImage.toBlob(container, opts);
+  }).then(function(blob) {
     document.body.removeChild(container);
     return navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(function() {
       showToast('Copied ' + count + ' items as PNG');

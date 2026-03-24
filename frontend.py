@@ -1305,10 +1305,7 @@ async function fetchSessionDetail() {
     const res = await fetch('/api/sessions');
     const data = await res.json();
     const session = (data.sessions || []).find(s => s.session_id === currentSessionId);
-    if (!session) {
-      showDashboard();
-      return;
-    }
+    if (!session) return;
 
     // Update title with state indicator
     const state = session.state || 'busy';

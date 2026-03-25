@@ -527,6 +527,8 @@ def _extract_tool_detail(tool_use):
         return inp.get("command", "")
     elif name in ("Write", "Edit", "mcp__acp__Write", "mcp__acp__Edit", "Read"):
         return inp.get("file_path", "")
+    elif name in ("ExitPlanMode", "EnterPlanMode"):
+        return inp.get("plan", "")
     else:
         return json.dumps(inp, ensure_ascii=False)[:200]
 
@@ -592,7 +594,10 @@ def _format_transcript_entry(entry):
                 elif c.get("type") == "tool_use":
                     name = c.get("name", "unknown")
                     detail = _extract_tool_detail(c)
-                    results.append((f"[Tool: {name}] {_truncate(detail, 500)}", None))
+                    if name in ("ExitPlanMode", "EnterPlanMode"):
+                        results.append((f"[Tool: {name}]\n{detail}", None))
+                    else:
+                        results.append((f"[Tool: {name}] {_truncate(detail, 500)}", None))
 
             if text_parts:
                 combined = "\n".join(text_parts)

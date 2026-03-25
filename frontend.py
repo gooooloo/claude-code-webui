@@ -1620,8 +1620,10 @@ function renderTranscript(entries) {
         if (t.name === 'Bash' || t.name === 'mcp__acp__Bash') detail = (t.input && t.input.command) || '';
         else if (t.name === 'Write' || t.name === 'Edit' || t.name === 'mcp__acp__Write' || t.name === 'mcp__acp__Edit') detail = (t.input && t.input.file_path) || '';
         else if (t.name === 'Read') detail = (t.input && t.input.file_path) || '';
+        else if (t.name === 'ExitPlanMode' || t.name === 'EnterPlanMode') detail = (t.input && t.input.plan) || '';
         else detail = JSON.stringify(t.input || {}).substring(0, 200);
-        items.push({ label: t.name, cls: 'msg-tool', html: esc(detail), copyLabel: 'Tool(' + t.name + ')', copyText: detail });
+        const toolHtml = (t.name === 'ExitPlanMode' || t.name === 'EnterPlanMode') ? renderMarkdown(detail) : esc(detail);
+        items.push({ label: t.name, cls: 'msg-tool', html: toolHtml, copyLabel: 'Tool(' + t.name + ')', copyText: detail });
       });
     }
   });

@@ -24,7 +24,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 import uuid
-import cgi
+from email.parser import BytesParser
+from email.policy import default as email_default_policy
 
 from frontend import HTML_PAGE
 from platform_utils import IS_WINDOWS, get_queue_dir, get_image_dir, is_process_alive, is_terminal_alive, find_claude_pid, get_process_children, get_process_name, encode_project_path, send_prompt, send_interrupt
@@ -1029,18 +1030,25 @@ class WebUIHandler(BaseHTTPRequestHandler):
             if "multipart/form-data" not in content_type:
                 self.send_error(400, "Expected multipart/form-data")
                 return
-            form = cgi.FieldStorage(
-                fp=self.rfile,
-                headers=self.headers,
-                environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type}
-            )
-            file_item = form["image"]
-            if file_item.filename:
-                ext = os.path.splitext(file_item.filename)[1].lower() or ".png"
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            # Parse multipart/form-data via email module (cgi removed in Python 3.13)
+            header_bytes = ("Content-Type: " + content_type + "\r\n\r\n").encode()
+            msg = BytesParser(policy=email_default_policy).parsebytes(header_bytes + body)
+            upload_filename = None
+            upload_data = None
+            for part in msg.iter_parts():
+                disp = part.get("Content-Disposition", "")
+                if "form-data" in disp and 'name="image"' in disp:
+                    upload_filename = part.get_filename()
+                    upload_data = part.get_payload(decode=True)
+                    break
+            if upload_filename and upload_data is not None:
+                ext = os.path.splitext(upload_filename)[1].lower() or ".png"
                 filename = str(uuid.uuid4()) + ext
                 filepath = os.path.join(IMAGE_DIR, filename)
                 with open(filepath, "wb") as f:
-                    f.write(file_item.file.read())
+                    f.write(upload_data)
                 print(f"[img] Saved image: {filepath}")
                 self._respond_json({"ok": True, "path": filepath})
             else:
